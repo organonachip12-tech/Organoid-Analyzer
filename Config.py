@@ -15,12 +15,12 @@ RESULTS_DIR = "./Results"
 
 
 # ======= CELL TRACKING SETTINGS =======
-FIJI_PATH = ""
+FIJI_PATH = r"path to \Fiji.app"
 JAVA_ARGUMENTS = '-Xmx12g'
 
 SPECIAL_THRESHOLDING = {"DiD-MSLN_NCI6_5 percent 20ms001\XY4" : 130}
 CELL_TRACKING_DATASET_CONFIGS = {
-    "CART": {"images_folder" : r"", 
+    "CART": {"images_folder" : r"path to \William_20250429_8 different patient_day 6 CART_for AI", 
                   "case_name": "CART",
                      "prefix": "",
              "subcase_names" : ["NYU318",
@@ -33,7 +33,7 @@ CELL_TRACKING_DATASET_CONFIGS = {
                                 "NCI9"],
         "specific_thresholds": {"DiD-MSLN_NCI6_5 percent 20ms001\XY4" : 130}},
 
-    "2nd": {"images_folder" : r"", 
+    "2nd": {"images_folder" : r"path to \William_20250522_Meso IL18 CART_5 patients_day 6_for AI", 
                  "case_name": "2ND",
                     "prefix": "2nd_",
             "subcase_names" : ["NYU352",
@@ -42,7 +42,7 @@ CELL_TRACKING_DATASET_CONFIGS = {
                                "NCI8",
                                "NCI9"]},
     
-    "PDO": {"images_folder" : r"", 
+    "PDO": {"images_folder" : r"path to \William_20250710_PDO device 1 to 8_for AI", 
                  "case_name": "PDO",
                     "prefix": "",
             "subcase_names" : ["Device1",
@@ -92,7 +92,7 @@ TRACK_LEN = len(track_features)
 
 
 # ======= TRAINING SETTINGS =======
-TEST_TRAIN_SPLIT_ANNOTATION_PATH = r""
+TEST_TRAIN_SPLIT_ANNOTATION_PATH = r"path to \Annotations.xlsx"
 SEQ_DATASET_PATH = os.path.join(GENERATED_DIR, f"{SEQ_DATASET_PREFIX}trajectory_dataset_{SEQ_LEN}.npz")
 TRACK_DATASET_PATH = os.path.join(GENERATED_DIR, f"{TRACK_DATASET_PREFIX}track_dataset.npz")
 
