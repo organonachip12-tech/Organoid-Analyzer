@@ -2,10 +2,11 @@ import os
 import imagej
 import jpype
 import scyjava
-from Config import DATA_DIR, IMAGES_FOLDER, FIJI_PATH, CASE_NAME, JAVA_ARGUMENTS
+from Config import DATA_DIR, FIJI_PATH, JAVA_ARGUMENTS, CELL_TRACKING_DATASET_CONFIGS
 import pandas as pd
 
-def track_with_trackmate(images_folder, case_name, fiji_path, include_spots_without_track_id = False, ignore_duplicate_warning = False, java_arguments = ""):
+def track_with_trackmate(images_folder, subcase_names, case_name, fiji_path, prefix = "", specific_thresholds ={}, 
+                         include_spots_without_track_id = False, ignore_duplicate_warning = False, java_arguments = ""):
 
     # Check if output folder can be created
     output_folder_path = os.path.join(DATA_DIR, case_name)
@@ -47,25 +48,34 @@ def track_with_trackmate(images_folder, case_name, fiji_path, include_spots_with
     DetectionUtils = jpype.JClass("fiji.plugin.trackmate.detection.DetectionUtils")
     MaskUtils = jpype.JClass("fiji.plugin.trackmate.detection.MaskUtils")
     Integer = jpype.JClass("java.lang.Integer")
-
-
-    for folder_path in sorted(os.listdir(images_folder)):
-        folder_path = os.path.join(images_folder, folder_path)
-        if not os.path.isdir(folder_path):
+    Double = jpype.JClass("java.lang.Double")
+    JDouble_array = jpype.JArray(jpype.JDouble, 1)
+    
+    for XY_position_folder_path in sorted(os.listdir(images_folder)):
+        XY_position_folder_path = os.path.join(images_folder, XY_position_folder_path)
+        if not os.path.isdir(XY_position_folder_path):
             continue  # skip files at root level
     
         all_tracks = []
         all_spots = []
 
-        if os.path.exists(folder_path):
-            print(f"Processing {folder_path} ...")
+        if os.path.exists(XY_position_folder_path):
+            print(f"Processing {XY_position_folder_path} ...")
         else:
-            print(f"FILEDNE {folder_path}")
+            print(f"FILEDNE {XY_position_folder_path}")
             return
         
         # Load image
         FolderOpener = jpype.JClass("ij.plugin.FolderOpener")
-        imp = FolderOpener.open(folder_path)
+        imp = FolderOpener.open(XY_position_folder_path)
+
+        # Set calibration (equivalent to Analyze > Set Scale...)
+        cal = imp.getCalibration()
+        cal.pixelWidth  = 0.33   # µm per pixel in X
+        cal.pixelHeight = 0.33   # µm per pixel in Y
+        cal.setUnit("µm")         # unit to display
+        cal.setTimeUnit("frames")
+        imp.setCalibration(cal)
 
         # Convert Z slices to T slices
         HyperStackConverter = jpype.JClass("ij.plugin.HyperStackConverter")
@@ -74,7 +84,10 @@ def track_with_trackmate(images_folder, case_name, fiji_path, include_spots_with
 
         # Initialize Trackmate Model
         model = Model()
+        model.setPhysicalUnits( cal.getUnit(), cal.getTimeUnit() )
         settings = jpype.JClass("fiji.plugin.trackmate.Settings")(imp)
+        print("Space units:", model.getSpaceUnits())
+        print("Time units:", model.getTimeUnits())
 
         # Calculate Threshold using Otsu
         channel, t = 0, 0 
@@ -82,17 +95,22 @@ def track_with_trackmate(images_folder, case_name, fiji_path, include_spots_with
         im_frame = DetectionUtils.prepareFrameImg(img, channel, t)
         interval = TMUtils.getInterval(img, settings)  
         interval = DetectionUtils.squeeze(interval)
-        threshold = MaskUtils.otsuThreshold(im_frame)
+        intensity_threshold = MaskUtils.otsuThreshold(im_frame)
 
-        
+        # Sometimes Auto-threshold gets it wrong, and detects too many cells
+        # use SPECIAL_THRESHOLDING in Config to set a specific threshold for a 
+        # specific folder
+        for key in specific_thresholds:
+            if key in XY_position_folder_path:
+                intensity_threshold = Double(specific_thresholds[key])
 
-        print("Using auto threshold of: ", threshold)
+        print("Using intensity threshold of: ", intensity_threshold)
 
         # Detector Settings
         settings.detectorFactory = ThresholdDetectorFactory()
         settings.detectorSettings = settings.detectorFactory.getDefaultSettings()
         settings.detectorSettings = {
-            'INTENSITY_THRESHOLD': threshold,  # auto threshold
+            'INTENSITY_THRESHOLD': intensity_threshold,  # auto threshold
             'TARGET_CHANNEL': Integer(1),
             'SIMPLIFY_CONTOURS': True,
         }
@@ -100,9 +118,8 @@ def track_with_trackmate(images_folder, case_name, fiji_path, include_spots_with
         # Tracker Settings
         settings.trackerFactory = SimpleSparseLAPTrackerFactory()
         settings.trackerSettings = settings.trackerFactory.getDefaultSettings() # almost good enough
-        
-        settings.trackerSettings['ALLOW_TRACK_SPLITTING'] = True
-        settings.trackerSettings['ALLOW_TRACK_MERGING'] = True
+        settings.trackerSettings['ALLOW_TRACK_SPLITTING'] = False
+        settings.trackerSettings['ALLOW_TRACK_MERGING'] = False
         settings.trackerSettings['LINKING_MAX_DISTANCE'] = 15.0
         settings.trackerSettings['GAP_CLOSING_MAX_DISTANCE'] = 15.0
         settings.trackerSettings.put("MAX_FRAME_GAP", Integer(2))
@@ -129,6 +146,8 @@ def track_with_trackmate(images_folder, case_name, fiji_path, include_spots_with
         TrackMotilityAnalyzer = jpype.JClass('fiji.plugin.trackmate.features.track.TrackMotilityAnalyzer')
         TrackSpeedStatisticsAnalyzer = jpype.JClass('fiji.plugin.trackmate.features.track.TrackSpeedStatisticsAnalyzer')
         TrackSpotQualityFeatureAnalyzer = jpype.JClass('fiji.plugin.trackmate.features.track.TrackSpotQualityFeatureAnalyzer')
+        DirectionalChangeAnalyzer = jpype.JClass('fiji.plugin.trackmate.features.edges.DirectionalChangeAnalyzer')
+        # Edge Analyzer is needed to calculate mean directional change rate
         
         settings.addTrackAnalyzer(TrackBranchingAnalyzer())
         settings.addTrackAnalyzer(TrackDurationAnalyzer())
@@ -137,26 +156,66 @@ def track_with_trackmate(images_folder, case_name, fiji_path, include_spots_with
         settings.addTrackAnalyzer(TrackSpeedStatisticsAnalyzer())
         settings.addTrackAnalyzer(TrackSpotQualityFeatureAnalyzer())
         settings.addTrackAnalyzer(TrackMotilityAnalyzer())
+        settings.addEdgeAnalyzer(DirectionalChangeAnalyzer())
 
-        # Run TrackMate and check if the inputs and processing run successfully
+        # ---------------------------------------------------------------------------------------------------
+        # RUN DETECTOR AND COMPUTER SPOT FEATURES TO CALCULATE INITAL THRESHOLDING VALUE (QUALTIY THRESHOLD)
+        # ---------------------------------------------------------------------------------------------------
         trackmate = TrackMate(model, settings)
 
         if not trackmate.checkInput():
             print(str(trackmate.getErrorMessage()))
-            print(f"TrackMate: Invalid input. {folder_path}")
+            print(f"TrackMate: Invalid input. {XY_position_folder_path}")
             continue
 
+        if not trackmate.execDetection():
+            print(str(trackmate.getErrorMessage()))
+            print(f"TrackMate: Unable to process tracking. {XY_position_folder_path}")
+            continue
+        if not trackmate.execInitialSpotFiltering():
+            print(str(trackmate.getErrorMessage()))
+            print(f"TrackMate: Unable to process tracking. {XY_position_folder_path}")
+            continue
+        if not trackmate.computeSpotFeatures(True):
+            print(str(trackmate.getErrorMessage()))
+            print(f"TrackMate: Unable to process tracking. {XY_position_folder_path}")
+            continue
+        
+        # -------------------------------------------------------------
+        # AUTO CALCULATE INITAL THRESHOLD (a.k.a. QUALITY THRESHOLD)
+        # -------------------------------------------------------------
+
+        spot_collection = model.getSpots()
+        qualities = [spot.getFeature("QUALITY") for spot in spot_collection.iterable(True) if spot.getFeature("QUALITY") is not None]
+
+        if not qualities:
+            raise ValueError("No spots detected, cannot compute threshold")
+        qualities_array = JDouble_array(qualities)
+
+        inital_quality_threshold = float(TMUtils.otsuThreshold(qualities_array))
+        print("Inital threshold:", inital_quality_threshold)
+        settings.initialSpotFilterValue = (Double(inital_quality_threshold))
+
+        # -------------------------------------------------------------------------------
+        # RUN TRACKMATE FULLY USING THE CALCULATED INITAL THRESHOLDING VALUE (QUALITY THRESHOLD)
+        # using trackmate.process()
+        # -------------------------------------------------------------------------------
+
+        trackmate = TrackMate(model, settings)
+        
         if not trackmate.process():
             print(str(trackmate.getErrorMessage()))
-            print(f"TrackMate: Unable to process tracking. {folder_path}")
+            print(f"TrackMate: Unable to process tracking. {XY_position_folder_path}")
             continue
 
-        # Feature models
         spot_collection = model.getSpots()
         feature_model = model.getFeatureModel()
         track_model = model.getTrackModel()
 
-        # --- Track-level features ---
+        
+        # -------------------------------------------------------------------------------
+        # GENERATE TRACK RESULTS DATAFRAME
+        # -------------------------------------------------------------------------------
         for track_id in track_model.trackIDs(True):
             row = {
                 "LABEL": f"Track_{track_id}",
@@ -176,7 +235,9 @@ def track_with_trackmate(images_folder, case_name, fiji_path, include_spots_with
 
             all_tracks.append(row)
 
-        # --- Spot-level features ---
+        # -------------------------------------------------------------------------------
+        # GENERATE SPOTS RESULTS DATAFRAME
+        # -------------------------------------------------------------------------------
         for spot in spot_collection.iterable(True):
             track_id = model.getTrackModel().trackIDOf(spot)
 
@@ -199,22 +260,45 @@ def track_with_trackmate(images_folder, case_name, fiji_path, include_spots_with
                     row[feature] = float(val) if val is not None else None
                 all_spots.append(row)
 
-        # Save results
-        df_tracks = pd.DataFrame(all_tracks)
+        # -------------------------------------------------------------------------------
+        # SAVE RESULTS
+        # -------------------------------------------------------------------------------
         df_spots = pd.DataFrame(all_spots)
+        df_spots = df_spots.sort_values(by="TRACK_ID")
 
-        subcase_name = "_".join(folder_path.split(os.sep)[-2:])
-        df_tracks.to_csv(os.path.join(output_folder_path, subcase_name + "_tracks.csv"), index=False)
-        df_spots.to_csv(os.path.join(output_folder_path, subcase_name +"_spots.csv"), index=False)
+        df_tracks = pd.DataFrame(all_tracks)
+        df_tracks = df_tracks.sort_values(by="TRACK_ID")
+        subcase_folder_path = XY_position_folder_path.split(os.sep)[-2]
+        XY_position = XY_position_folder_path.split(os.sep)[-1]
 
-        print("Done! Exported all track and spot features to CSV ")
+        for subcase_name in subcase_names:
+            if subcase_name in subcase_folder_path:
+                spots_output_path = os.path.join(output_folder_path, f"{prefix}{subcase_name}_{XY_position}_spots.csv")
+                track_output_path = os.path.join(output_folder_path, f"{prefix}{subcase_name}_{XY_position}_tracks.csv")
+
+                df_spots.to_csv(spots_output_path, index=False)
+                df_tracks.to_csv(track_output_path, index=False)
+                print("Done! Exported all track and spot features to CSV at: ")
+                print(f"'{spots_output_path}' and '{track_output_path}'\n")
+                break
+        else:
+            print(f" No subcases in: {subcase_names} could be found in '{subcase_folder_path}'.")
+            print(f" Please update {subcase_names} or rename '{subcase_folder_path}'.")
+            input()
 
 if __name__ == "__main__":
-    for subfolder in sorted(os.listdir(IMAGES_FOLDER)):
-        images_subfolder = os.path.join(IMAGES_FOLDER, subfolder)
-        track_with_trackmate(images_subfolder, 
-                             CASE_NAME, 
-                             FIJI_PATH, 
-                             java_arguments = JAVA_ARGUMENTS,
-                             include_spots_without_track_id = False, 
-                             ignore_duplicate_warning = True, )
+    for case in CELL_TRACKING_DATASET_CONFIGS:
+        for subfolder in sorted(os.listdir(CELL_TRACKING_DATASET_CONFIGS[case]["images_folder"])):
+            images_subfolder = os.path.join(CELL_TRACKING_DATASET_CONFIGS[case]["images_folder"], subfolder)
+            track_with_trackmate(images_subfolder, 
+                                CELL_TRACKING_DATASET_CONFIGS[case]["subcase_names"],
+                                CELL_TRACKING_DATASET_CONFIGS[case]["case_name"], 
+                                FIJI_PATH, 
+                                prefix = CELL_TRACKING_DATASET_CONFIGS[case]["prefix"],
+                                specific_thresholds = CELL_TRACKING_DATASET_CONFIGS[case].get("specific_thresholds", {}),
+                                java_arguments = JAVA_ARGUMENTS,
+                                include_spots_without_track_id = False, 
+                                ignore_duplicate_warning = True)
+    print("------------------------")
+    print("Cell Tracking Complete!")
+    print("------------------------")

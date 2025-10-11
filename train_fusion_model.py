@@ -92,7 +92,6 @@ def train_test_split_by_case(seq_path, track_path, test_train_split_annotation_p
     train_cases = annotations_df.loc[annotations_df["Train or Test"] == 0, "Case"].tolist()
     test_cases  = annotations_df.loc[annotations_df["Train or Test"] == 1, "Case"].tolist()
 
-
     seq_data = np.load(seq_path, allow_pickle=True)
     track_data = np.load(track_path, allow_pickle=True)
 
@@ -144,6 +143,8 @@ def train_test_split_by_case(seq_path, track_path, test_train_split_annotation_p
             np.array(X_track_matched_train), np.array(X_track_matched_test), 
             np.array(y_matched_train), np.array(y_matched_test))
 
+
+
 def run_inference(model, X_seq, X_track, device):
     model.eval()
     with torch.no_grad():
@@ -154,7 +155,7 @@ def run_inference(model, X_seq, X_track, device):
 
 def Train_UnifiedFusionModel(seq_path, track_path, result_path, test_train_split_annotation_path,
                              seq_input_size=9, track_input_size=12, hidden_size=128, fusion_size=128, dropout=0.5, model_save_path="", test_prefix="no_prefix"):
-    
+
     print("[STEP 1] Loading and aligning data...")
     X_seq_train_total, X_seq_test, X_track_train_total, X_track_test, y_train_total, y_test_original = train_test_split_by_case(seq_path, track_path, test_train_split_annotation_path=test_train_split_annotation_path)
 

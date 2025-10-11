@@ -15,10 +15,47 @@ RESULTS_DIR = "./Results"
 
 
 # ======= CELL TRACKING SETTINGS =======
-IMAGES_FOLDER = r"C:\Users\billy\Documents\VIP Images\20250819_Different stroma density_early stage dynamics_2 batch"
-FIJI_PATH = r"C:\Users\billy\Desktop\Fiji.app"
-CASE_NAME = "DiffStroma"
-JAVA_ARGUMENTS = '-Xmx10g'
+FIJI_PATH = ""
+JAVA_ARGUMENTS = '-Xmx12g'
+
+SPECIAL_THRESHOLDING = {"DiD-MSLN_NCI6_5 percent 20ms001\XY4" : 130}
+CELL_TRACKING_DATASET_CONFIGS = {
+    "CART": {"images_folder" : r"", 
+                  "case_name": "CART",
+                     "prefix": "",
+             "subcase_names" : ["NYU318",
+                                "NYU352",
+                                "NYU358",
+                                "NYU360",
+                                "NCI2",
+                                "NCI6",
+                                "NCI8",
+                                "NCI9"],
+        "specific_thresholds": {"DiD-MSLN_NCI6_5 percent 20ms001\XY4" : 130}},
+
+    "2nd": {"images_folder" : r"", 
+                 "case_name": "2ND",
+                    "prefix": "2nd_",
+            "subcase_names" : ["NYU352",
+                               "NYU360",
+                               "NCI6",
+                               "NCI8",
+                               "NCI9"]},
+    
+    "PDO": {"images_folder" : r"", 
+                 "case_name": "PDO",
+                    "prefix": "",
+            "subcase_names" : ["Device1",
+                               "Device2",
+                               "Device3",
+                               "Device4",
+                               "Device5",
+                               "Device6",
+                               "Device7",
+                               "Device8"]},
+}
+
+
 
 
 
@@ -41,7 +78,7 @@ TRACK_DATASET_PREFIX = ""
 features = [ # Time-based Features 
     'AREA', 'PERIMETER', 'CIRCULARITY',
     'ELLIPSE_ASPECTRATIO','SOLIDITY', 
-    'SPEED', "MEAN_SQUARE_DISPLACEMENT"
+    'SPEED', "MEAN_SQUARE_DISPLACEMENT", "RADIUS"
 ]
 
 
@@ -55,7 +92,7 @@ TRACK_LEN = len(track_features)
 
 
 # ======= TRAINING SETTINGS =======
-TEST_TRAIN_SPLIT_ANNOTATION_PATH = r"C:\Users\billy\Desktop\VIP\Tianzan\Cell-Track-Multi-Model\Data\Annotations.xlsx"
+TEST_TRAIN_SPLIT_ANNOTATION_PATH = r""
 SEQ_DATASET_PATH = os.path.join(GENERATED_DIR, f"{SEQ_DATASET_PREFIX}trajectory_dataset_{SEQ_LEN}.npz")
 TRACK_DATASET_PATH = os.path.join(GENERATED_DIR, f"{TRACK_DATASET_PREFIX}track_dataset.npz")
 

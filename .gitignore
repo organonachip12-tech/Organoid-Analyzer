@@ -1,4 +1,6 @@
 venv/
 Data/
+Generated/
+Results/
 __pycache__/
 *.pyc

@@ -126,7 +126,7 @@ def load_tracks_and_spots(datasets):
                                         header=None)
                 names_track = df_raw_track.iloc[0].tolist()
                 df_track = pd.read_csv(track_path, encoding='latin1',
-                                    skiprows=4, names=names_track)
+                                    skiprows=1, names=names_track)
                 #all as float
                 df_track = df_track.apply(pd.to_numeric, errors='coerce')
 
@@ -137,7 +137,7 @@ def load_tracks_and_spots(datasets):
                                         header=None)
                 names_spot = df_raw_spot.iloc[0].tolist()
                 df_spot = pd.read_csv(spot_path, encoding='latin1',
-                                    skiprows=4, names=names_spot)
+                                    skiprows=1, names=names_spot)
                 df_spot = df_spot.apply(pd.to_numeric, errors='coerce')
                 df_spot['PREFIX'] = prefix
                 df_spot['LABEL'] = label_dict[label_prefix]
@@ -153,7 +153,6 @@ def load_tracks_and_spots(datasets):
                 sys.exit(1)
                 
                 continue
-
 
     spots_df = pd.concat(spots, ignore_index=True)
     tracks_df = pd.concat(tracks, ignore_index=True)
@@ -260,7 +259,6 @@ def align_and_save_dataset(spots_df, features, seq_len=20,
                            output_prefix=""):
     X_list, y_list, track_id_list = [], [], []
     rows = []
-
     for (p, tid), traj in spots_df.groupby(["PREFIX", "TRACK_ID"]):
         feat = traj[features].values
         if len(feat) >= seq_len:
@@ -320,7 +318,6 @@ def build_track_level_dataset(tracks_df, datasets,
                           ["LABEL", "PREFIX", "TRACK_ID"]).copy()
 
     records = []
-    
     for prefix, group in df.groupby("PREFIX"):
         group_scaled = group[track_features].values
 
@@ -347,40 +344,49 @@ def build_track_level_dataset(tracks_df, datasets,
 
 
 def filter_outer(spots_df):
+    def log_debug_stats(df, conditions, label):
+        total_rows = len(df)
+        print(f"\n[Debug] --- {label} ---")
+        print(f"[Debug] Current total rows: {total_rows}")
+
+        for name, cond_fn in conditions.items():
+            cond = cond_fn(df)   # Evaluate fresh on the current DataFrame
+            print(f"[Debug] Rows with {name}: {cond.sum()}")
+
+        return total_rows
+        
+    conditions_to_remove = {
+        "ELLIPSE_MINOR == 0": lambda df: df['ELLIPSE_MINOR'] == 0,
+        "ELLIPSE_ASPECTRATIO <= 0": lambda df: df['ELLIPSE_ASPECTRATIO'] <= 0,
+        "ELLIPSE_ASPECTRATIO > 5": lambda df: df['ELLIPSE_ASPECTRATIO'] > 5,
+    }
+
+    # --------------------------------------
+    # REMOVE ANY TRACK WHERE EVEN 1 INSTANCE 
+    # DOES NOT FOLLOW THE ABOVE CONDITIONS
+    # --------------------------------------
+
     init_rows = len(spots_df)
-    minor_zero_count = (spots_df['ELLIPSE_MINOR'] == 0).sum()
-    aspect_neg_or_zero = (spots_df['ELLIPSE_ASPECTRATIO'] <= 0).sum()
-    aspect_too_large = (spots_df['ELLIPSE_ASPECTRATIO'] > 5).sum()
+    condition_series = [cond(spots_df) for cond in conditions_to_remove.values()]
+    rows_to_remove = pd.concat(condition_series, axis=1).any(axis=1)
+    log_debug_stats(spots_df, conditions_to_remove, "Before Filtering")
 
-    print(f"[Debug] Total rows before filtering: {init_rows}")
-    print(f"[Debug] Rows with ELLIPSE_MINOR == 0: {minor_zero_count}")
-    print(f"[Debug] Rows with ELLIPSE_ASPECTRATIO <= 0: {aspect_neg_or_zero}")
-    print(f"[Debug] Rows with ELLIPSE_ASPECTRATIO > 5: {aspect_too_large}")
+    # -------------------------------------------
+    # CLIP ANY OUTLIER VALUES TO A SPECIFIC VALUE
+    # -------------------------------------------
+    spots_df["ELLIPSE_ASPECTRATIO"] = spots_df["ELLIPSE_ASPECTRATIO"].clip(upper=5)
 
-    rows_to_remove = (
-        (spots_df['ELLIPSE_MINOR'] <= 0) |
-        (spots_df['ELLIPSE_ASPECTRATIO'] <= 0) |
-        (spots_df['ELLIPSE_ASPECTRATIO'] >= 5)
-    )
-
-    # Find all groups (PREFIX, TRACK_ID) where ANY row meets the condition
+    # -------------------------------------------
+    # REMOVE ANY OUTLIER GROUPS
+    # -------------------------------------------
     bad_groups = spots_df.loc[rows_to_remove, ['PREFIX', 'TRACK_ID']].drop_duplicates()
-
-    # Filter out those groups entirely
     filtered_df = spots_df.merge(bad_groups, on=['PREFIX', 'TRACK_ID'], how='left', indicator=True)
     filtered_df = filtered_df[filtered_df['_merge'] == 'left_only'].drop(columns=['_merge'])
 
     spots_df = filtered_df
     
-    minor_zero_count = (spots_df['ELLIPSE_MINOR'] == 0).sum()
-    aspect_neg_or_zero = (spots_df['ELLIPSE_ASPECTRATIO'] <= 0).sum()
-    aspect_too_large = (spots_df['ELLIPSE_ASPECTRATIO'] > 5).sum()
+    log_debug_stats(spots_df, conditions_to_remove, "After Filtering")
 
-
-    print(f"[Debug] Total rows before filtering: {init_rows}")
-    print(f"[Debug] Rows with ELLIPSE_MINOR == 0: {minor_zero_count}")
-    print(f"[Debug] Rows with ELLIPSE_ASPECTRATIO <= 0: {aspect_neg_or_zero}")
-    print(f"[Debug] Rows with ELLIPSE_ASPECTRATIO > 5: {aspect_too_large}")
     filtered_rows = len(spots_df)
     removed_count = init_rows - filtered_rows
     print(f"[Filter] Removed {removed_count} invalid rows | Remaining: {filtered_rows}")
@@ -388,7 +394,68 @@ def filter_outer(spots_df):
     num_groups_removed = bad_groups.shape[0]
     print(f"Removed {num_groups_removed} cell tracks.")
 
+
+    # --------------------------------------
+    # REMOVE IF AVERAGE RADIUS SIZE IS TOO SMALL
+    # --------------------------------------
+    groups_before = spots_df.groupby(["PREFIX", "TRACK_ID"]).ngroups
+    avg_radius = spots_df.groupby(["PREFIX", "TRACK_ID"])["RADIUS"].transform("mean")
+    spots_df = spots_df[avg_radius >= 3].reset_index(drop=True)
+    
+    filtered_rows = len(spots_df)
+    removed_count = init_rows - filtered_rows
+    print(f"[Filter] Removed {removed_count} invalid rows because of RADIUS | Remaining: {filtered_rows}")
+    groups_after = spots_df.groupby(["PREFIX", "TRACK_ID"]).ngroups
+
+    num_groups_removed = groups_before - groups_after
+    print(f"Removed {num_groups_removed} cell tracks.")
+
     return spots_df
+
+
+def count_num_of_tracks(seq_path, track_path):
+    from collections import defaultdict
+    from Config import DATA_DIR
+    seq_data = np.load(seq_path, allow_pickle=True)
+    track_data = np.load(track_path, allow_pickle=True)
+
+    X_seq, y_seq, track_ids_seq = seq_data['X'], seq_data['y'], seq_data['track_ids']
+    X_track, y_track, track_ids_track = track_data['X'], track_data['y'], track_data['track_ids']
+
+    if X_seq.shape[1] == 11 and X_seq.shape[2] == 20:
+        print("transposing...")
+        X_seq = np.transpose(X_seq, (0, 2, 1))
+
+    track_id_to_index = {
+        tuple(tid) if isinstance(tid, (list, tuple, np.ndarray)) else (tid,): i
+        for i, tid in enumerate(track_ids_track)
+    }
+
+    test_label_dist_dict = defaultdict(int)
+    test_label_value_dist_dict = defaultdict(int)
+
+    for i, tid in enumerate(track_ids_seq):
+        key = tuple(tid) if isinstance(tid, (list, tuple, np.ndarray)) else (tid,)
+        if key in track_id_to_index:
+            case_name = "_".join(tid[0].split("_")[:2])
+            test_label_dist_dict[case_name] += 1
+            test_label_value_dist_dict[y_seq[i]] += 1
+    label_df = pd.DataFrame([test_label_dist_dict])
+    label_df = label_df.T
+    label_df["Label"] = [0.5, 0.5, 0.5, 0.5,
+    1, 1, 0, 0,
+    0.5, 0.5, 0.5, 0.5,
+    1, 1, 1,
+    0.5, 0.5, 0,
+    0.5, 0, 1]
+
+    label_df = label_df.reset_index()
+    label_df.columns = ["Case Name", "Number of Tracks", "Label"]
+    label_df = label_df.sort_values(by="Number of Tracks")
+    label_df = label_df.sort_values(by="Label")
+
+    label_df.to_csv(f"{DATA_DIR}/label counts.csv", index=False)
+    print("Saved Label counts")
 
 
 if __name__ == "__main__":
@@ -438,6 +505,12 @@ if __name__ == "__main__":
     tracks_final = tracks_df.copy()
     tracks_final[track_features] = tracks_scaled
 
+    features = [ # Time-based Features 
+        'AREA', 'PERIMETER', 'CIRCULARITY',
+        'ELLIPSE_ASPECTRATIO','SOLIDITY', 
+        'SPEED', "MEAN_SQUARE_DISPLACEMENT"
+    ]
+
     from Config import SEQ_LEN
     for seq_len_iter in [SEQ_LEN]:
         align_and_save_dataset(spots_final,
@@ -445,5 +518,7 @@ if __name__ == "__main__":
                             output_prefix=SEQ_DATASET_PREFIX)
     
     build_track_level_dataset(tracks_final, datasets=datasets, output_prefix=TRACK_DATASET_PREFIX)   
+    count_num_of_tracks(f"{GENERATED_DIR}/{SEQ_DATASET_PREFIX}trajectory_dataset_{SEQ_LEN}.npz",
+                        f"{GENERATED_DIR}/{TRACK_DATASET_PREFIX}track_dataset.npz",)
     
     print("Dataset creation completed.")
