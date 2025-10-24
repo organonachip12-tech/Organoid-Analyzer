@@ -1,0 +1,5 @@
+./organoid-til-env/
+experiments_results/
+.DS_Store
+organoid-til-env/
+organoid-til-env/lib/python3.12/site-packages/scipy/special/tests/test_dd.py

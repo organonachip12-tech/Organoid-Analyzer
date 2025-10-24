@@ -18,6 +18,9 @@ from PIL import Image
 import pandas as pd
 import umap
 
+# Global output directory - will be set by command line arguments
+OUTPUT_DIR = "./results"
+
 from lifelines.statistics import logrank_test
 
 import nnet_survival_pytorch
@@ -81,7 +84,9 @@ def get_data(annotations_path):
         survival_times = []
         death_occurreds = []
 
-        for lines in csvFile:
+        for i, lines in enumerate(csvFile):
+            if i == 0:  # Skip header row
+                continue
             image_filenames.append(lines[0])
             survival_times.append(float(lines[1]))
             death_occurreds.append(int(lines[2]))
@@ -104,20 +109,24 @@ def save_results(survival_times, excel_filepath):
     df_combined.to_excel(excel_filepath, index=False)  
 
 
-def generate_survival_graph_noKMF(low_dataloader, med_dataloader, high_dataloader, model, save_dir = './results/metrics'):
+def generate_survival_graph_noKMF(low_dataloader, med_dataloader, high_dataloader, model, save_dir = None):
+    if save_dir is None:
+        save_dir = os.path.join(OUTPUT_DIR, "metrics")
     os.makedirs(save_dir, exist_ok=True)
 
     n = 0
-    excel_filepath = save_dir + r'\metrics'+str(n)+'.xlsx'
+    excel_filepath = os.path.join(save_dir, f'metrics{n}.xlsx')
     while(os.path.exists(excel_filepath)):
         n += 1
-        excel_filepath = save_dir + r'\metrics'+str(n)+'.xlsx'
+        excel_filepath = os.path.join(save_dir, f'metrics{n}.xlsx')
 
     low_survivals_array = []
     med_survivals_array = []
     high_survivals_array = []
 
-    surv_array = np.zeros((3, 15, 21))
+    # Calculate the maximum number of samples across all datasets
+    max_samples = max(len(low_dataloader.dataset), len(med_dataloader.dataset), len(high_dataloader.dataset))
+    surv_array = np.zeros((3, max_samples, 21))
     breaks=np.arange(0.,365.*3,365./7)
 
 
@@ -262,9 +271,9 @@ def generate_survival_graph_noKMF(low_dataloader, med_dataloader, high_dataloade
     plt.ylabel('Survival Probability')
     plt.title("All Survivals")
     plt.legend(loc = "lower right")
-    save_dir = r"./validate_survivals/Umap"
+    save_dir = os.path.join(OUTPUT_DIR, "validate_survivals", "Umap")
     os.makedirs(save_dir, exist_ok=True)
-    save_filepath = save_dir + r'\survival_curve.png'
+    save_filepath = os.path.join(save_dir, 'survival_curve.png')
     
     plt.savefig(save_filepath)
     plt.cla()
@@ -394,9 +403,9 @@ def getUMAP_all(model, high_surv_dataloader, med_surv_dataloader, low_surv_datal
         plt.legend()
 
         
-        save_dir = r"./validate_survivals/Umap/AllImages/UmapbyClass"
+        save_dir = os.path.join(OUTPUT_DIR, "validate_survivals", "Umap", "AllImages", "UmapbyClass")
         os.makedirs(save_dir, exist_ok=True)
-        save_filepath = save_dir + r'\all_images_neighbors_'+str(num_neighbors)+'.png'
+        save_filepath = os.path.join(save_dir, f'all_images_neighbors_{num_neighbors}.png')
 
         plt.savefig(save_filepath)
         plt.cla()
@@ -412,9 +421,9 @@ def getUMAP_all(model, high_surv_dataloader, med_surv_dataloader, low_surv_datal
             plt.title(f'UMAP colored with {num_neighbors} neighbors and {num_cluster} Kmeans clusters (All)')
             plt.xlabel('UMAP Dimension 1')
             plt.ylabel('UMAP Dimension 2')
-            save_dir = r"./validate_survivals/Umap/AllImages/UmapbyKmeans" + fr"/Neighbors_{num_neighbors}"
+            save_dir = os.path.join(OUTPUT_DIR, "validate_survivals", "Umap", "AllImages", "UmapbyKmeans", f"Neighbors_{num_neighbors}")
             os.makedirs(save_dir, exist_ok=True)
-            save_filepath = save_dir + r'\kmeans_all_images_neighbors_'+str(num_neighbors)+'_clusters_'+str(num_cluster)+'.png'
+            save_filepath = os.path.join(save_dir, f'kmeans_all_images_neighbors_{num_neighbors}_clusters_{num_cluster}.png')
 
             plt.savefig(save_filepath)
             plt.cla()
@@ -423,9 +432,9 @@ def getUMAP_all(model, high_surv_dataloader, med_surv_dataloader, low_surv_datal
         plt.title('Elbow method (All)')
         plt.xlabel('Number of clusters')
         plt.ylabel('Inertia')
-        save_dir = r"./validate_survivals/Umap/AllImages/Kmeans"
+        save_dir = os.path.join(OUTPUT_DIR, "validate_survivals", "Umap", "AllImages", "Kmeans")
         os.makedirs(save_dir, exist_ok=True)
-        save_filepath = save_dir + r'\kmeans_all_images_neighbors_'+str(num_neighbors)+'.png'
+        save_filepath = os.path.join(save_dir, f'kmeans_all_images_neighbors_{num_neighbors}.png')
 
         plt.savefig(save_filepath)
         plt.cla()
@@ -507,10 +516,10 @@ def getUMAP_only_chip(model, high_surv_dataloader, med_surv_dataloader, low_surv
             plt.title(f'UMAP Projection of Extracted Features from On-Chip Images: neighbors_{num_neighbors}')
             plt.legend()
 
-            save_dir = r".\results\Umap\ChipImages\UmapbyClass"
+            save_dir = os.path.join(OUTPUT_DIR, "results", "Umap", "ChipImages", "UmapbyClass")
             os.makedirs(save_dir, exist_ok=True)
             
-            save_filepath = save_dir + r'\chip_neighbors_'+str(num_neighbors) + f"_{min_distance:.2f}" +'.png'
+            save_filepath = os.path.join(save_dir, f'chip_neighbors_{num_neighbors}_{min_distance:.2f}.png')
 
             plt.savefig(save_filepath)
             plt.cla()
@@ -527,9 +536,9 @@ def getUMAP_only_chip(model, high_surv_dataloader, med_surv_dataloader, low_surv
                 plt.xlabel('UMAP Dimension 1')
                 plt.ylabel('UMAP Dimension 2')
 
-                save_dir = r'.\results\Umap\ChipImages\UmapbyKmeans' + fr'\Neighbors_{num_neighbors}' 
+                save_dir = os.path.join(OUTPUT_DIR, 'results', 'Umap', 'ChipImages', 'UmapbyKmeans', f'Neighbors_{num_neighbors}')
                 os.makedirs(save_dir, exist_ok=True)
-                save_filepath = save_dir + r'\kmeans_chip_neighbors_'+str(num_neighbors) + f"_{min_distance:.2f}" + '_clusters_'+str(num_cluster)+'.png'
+                save_filepath = os.path.join(save_dir, f'kmeans_chip_neighbors_{num_neighbors}_{min_distance:.2f}_clusters_{num_cluster}.png')
 
                 plt.savefig(save_filepath)
                 plt.cla()
@@ -538,23 +547,26 @@ def getUMAP_only_chip(model, high_surv_dataloader, med_surv_dataloader, low_surv
             plt.title('Elbow method')
             plt.xlabel('Number of clusters')
             plt.ylabel('Inertia')
-            save_dir = r'.\results\Umap\ChipImages\Kmeans'
+            save_dir = os.path.join(OUTPUT_DIR, 'results', 'Umap', 'ChipImages', 'Kmeans')
             os.makedirs(save_dir, exist_ok=True)
-            save_filepath = save_dir + r'\kmeans_chip_neighbors_'+str(num_neighbors)+  f"_{min_distance:.2f}" +'.png'
+            save_filepath = os.path.join(save_dir, f'kmeans_chip_neighbors_{num_neighbors}_{min_distance:.2f}.png')
 
             plt.savefig(save_filepath)
             plt.cla()
 
 
 
-def main():
+def main(output_dir=None):
+    global OUTPUT_DIR
+    if output_dir:
+        OUTPUT_DIR = output_dir
     breaks=np.arange(0.,365.*3,365./7)
     num_intervals=len(breaks)-1
 
-    high_surv_annotations = r".\chip annotations\annotations_chip_high_surv.csv"
-    med_surv_annotations = r".\chip annotations\annotations_chip_med_surv.csv"
-    low_surv_annotations = r".\chip annotations\annotations_chip_low_surv.csv"
-    train_annotations_path = r'.\annotations.csv'
+    high_surv_annotations = "./Data/chip annotations/annotations_chip_high_surv_corrected.csv"
+    med_surv_annotations = "./Data/chip annotations/annotations_chip_med_surv_corrected.csv"
+    low_surv_annotations = "./Data/chip annotations/annotations_chip_low_surv_corrected.csv"
+    train_annotations_path = './Data/chip annotations/combined_training_corrected.csv'
 
     h_images, h_survival_times, h_censoreds = get_data(high_surv_annotations)
     m_images, m_survival_times, m_censoreds = get_data(med_surv_annotations)
@@ -601,14 +613,14 @@ def main():
     raw_train_data_loader = DataLoader(raw_train_dataset, batch_size, shuffle=True)
 
     save_model_filepath = [
-        ".\epoch 75.pt"
+        "./Data/epoch 75.pt"
     ] 
     models = []
 
     for i in range(len(save_model_filepath)):
-        models.append(GoodUmapandGraph(num_intervals))
+        models.append(GoodUmapandGraph(num_intervals, intermediate_features, dropout_prob))
 
-        models[i].load_state_dict(torch.load(save_model_filepath[i], weights_only=True))
+        models[i].load_state_dict(torch.load(save_model_filepath[i], weights_only=True, map_location=torch.device('cpu')))
         models[i].to(device)
         models[i].eval()
 
@@ -625,7 +637,42 @@ def main():
     print("Done")
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    import os
+    
+    parser = argparse.ArgumentParser(description="Train TIL Analyzer model")
+    
+    # Model parameters
+    parser.add_argument("--intermediate_features", type=int, default=512, help="Intermediate features")
+    parser.add_argument("--second_intermediate_features", type=int, default=512, help="Second intermediate features")
+    parser.add_argument("--dropout_prob", type=float, default=0.5, help="Dropout probability")
+    parser.add_argument("--batch_size", type=int, default=16, help="Batch size")
+    parser.add_argument("--epochs", type=int, default=200, help="Number of epochs")
+    parser.add_argument("--learning_rate", type=float, default=0.00025, help="Learning rate")
+    
+    # Output
+    parser.add_argument("--output_dir", help="Output directory for results")
+    
+    args = parser.parse_args()
+    
+    # Set global variables for the model
+    # Note: Using 512 to match the pre-trained model architecture
+    intermediate_features = 512  # args.intermediate_features
+    second_intermediate_features = args.second_intermediate_features
+    dropout_prob = args.dropout_prob
+    batch_size = args.batch_size
+    epochs = args.epochs
+    learning_rate = args.learning_rate
+    
+    # Override output directory if provided
+    if args.output_dir:
+        os.makedirs(args.output_dir, exist_ok=True)
+        # Set global output directory for all save operations
+        OUTPUT_DIR = args.output_dir
+    else:
+        OUTPUT_DIR = "./results"
+    
+    main(args.output_dir)
 
  
 
@@ -635,7 +682,9 @@ def validate_during_testing(low_dataloader, med_dataloader, high_dataloader, mod
     med_survivals_array = []
     high_survivals_array = []
 
-    surv_array = np.zeros((3, 15, 21))
+    # Calculate the maximum number of samples across all datasets
+    max_samples = max(len(low_dataloader.dataset), len(med_dataloader.dataset), len(high_dataloader.dataset))
+    surv_array = np.zeros((3, max_samples, 21))
     breaks=np.arange(0.,365.*3,365./7)
 
 
@@ -704,9 +753,9 @@ def validate_during_testing(low_dataloader, med_dataloader, high_dataloader, mod
     plt.title("All Survivals")
     plt.legend(loc = "lower right")
 
-    save_dir = "./results"
+    save_dir = OUTPUT_DIR
     os.makedirs(save_dir, exist_ok=True)
-    save_filepath = save_dir + r'\chip_epoch_'+str(epoch)+'.png'
+    save_filepath = os.path.join(save_dir, f'chip_epoch_{epoch}.png')
 
     plt.savefig(save_filepath)
     plt.cla()

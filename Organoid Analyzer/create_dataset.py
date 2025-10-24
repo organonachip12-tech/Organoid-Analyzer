@@ -508,7 +508,7 @@ if __name__ == "__main__":
     features = [ # Time-based Features 
         'AREA', 'PERIMETER', 'CIRCULARITY',
         'ELLIPSE_ASPECTRATIO','SOLIDITY', 
-        'SPEED', "MEAN_SQUARE_DISPLACEMENT"
+        'SPEED', "MEAN_SQUARE_DISPLACEMENT", "RADIUS"
     ]
 
     from Config import SEQ_LEN
