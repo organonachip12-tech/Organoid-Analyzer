@@ -494,7 +494,7 @@ def train_models_and_shap(ablation_configs, seq_dataset_path, track_dataset_path
         train_val_loss_diff_df = pd.DataFrame([["Difference between Train/Val Loss"]+[2**i for i in range(min_pow_hidden, max_pow_hidden)]])
         r_squared_df = pd.DataFrame([["R-Squared (Test)"]+[2**i for i in range(min_pow_hidden, max_pow_hidden)]])
 
-        for fusion_pow in range(min_pow_fusion, max_pow_fusion):
+        for fusion_pow in range(MIN_POW_FUSION, MAX_POW_FUSION + 1):
             fusion_size = 2**fusion_pow
             train_accuracies = [fusion_size]
             val_accuracies = [fusion_size]

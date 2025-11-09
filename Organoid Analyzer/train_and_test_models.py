@@ -11,8 +11,9 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=MAX_EPOCHS, help="Number of epochs")
     parser.add_argument("--batch_size", type=int, default=BATCH_SIZE, help="Batch size")
     parser.add_argument("--dropout", type=float, default=DROPOUT, help="Dropout rate")
-    parser.add_argument("--hidden_sizes", type=int, default=2**MAX_POW_HIDDEN, help="Hidden layer size")
-    parser.add_argument("--fusion_sizes", type=int, default=2**MAX_POW_FUSION, help="Fusion layer size")
+    parser.add_argument("--hidden_sizes", type=int, default=256, help="Hidden layer size")
+    parser.add_argument("--fusion_sizes", type=int, default=128, help="Fusion layer size")
+
     
     # Output
     parser.add_argument("--output_dir", help="Output directory for results")
@@ -26,10 +27,11 @@ if __name__ == "__main__":
     DROPOUT = args.dropout
     
     # Convert sizes to power values
-    MAX_POW_HIDDEN = int(args.hidden_sizes ** 0.5)
-    MIN_POW_HIDDEN = MAX_POW_HIDDEN - 1  # Create a range of at least 1
-    MAX_POW_FUSION = int(args.fusion_sizes ** 0.5)
-    MIN_POW_FUSION = MAX_POW_FUSION - 1  # Create a range of at least 1
+    MAX_POW_HIDDEN = args.hidden_sizes.bit_length() - 1
+    MIN_POW_HIDDEN = MAX_POW_HIDDEN - 1
+
+    MAX_POW_FUSION = args.fusion_sizes.bit_length() - 1
+    MIN_POW_FUSION = MAX_POW_FUSION - 1 
     
     # Override output directory if provided
     if args.output_dir:
