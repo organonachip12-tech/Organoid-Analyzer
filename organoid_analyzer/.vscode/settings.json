@@ -1,0 +1,9 @@
+{
+    "python.defaultInterpreterPath": "/Users/christinewagner/Documents/VIP/Organoid-Analyzer/Organoid Analyzer/venv/bin/python",
+    "python.pythonPath": "/Users/christinewagner/Documents/VIP/Organoid-Analyzer/Organoid Analyzer/venv/bin/python",
+    "python.analysis.extraPaths": [
+        "/Users/christinewagner/Documents/VIP/Organoid-Analyzer/Organoid Analyzer/venv/lib/python3.12/site-packages"
+    ],
+    "python.analysis.indexing": true,
+    "python.analysis.autoImportCompletions": true
+}
