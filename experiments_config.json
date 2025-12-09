@@ -1,57 +1,47 @@
 {
     "global_settings": {
+        "log_level": "INFO",
         "max_parallel_experiments": 2,
-        "output_dir": "./experiments_results",
-        "log_level": "INFO"
+        "output_dir": "./experiments_results"
     },
     "organoid_experiments": [
         {
-            "name": "organoid_baseline",
-            "hidden_sizes": [
-                16,
-                32,
-                64
-            ],
-            "fusion_sizes": [
-                32,
-                64,
-                128
+            "batch_size": [
+                128,
+                256
             ],
             "dropout": [
                 0.3,
                 0.5
-            ],
-            "seq_len": [
-                50,
-                100
-            ],
-            "batch_size": [
-                128,
-                256
             ],
             "epochs": [
                 200,
                 400
             ],
             "features": "all",
+            "fusion_sizes": [
+                32,
+                64,
+                128
+            ],
+            "hidden_sizes": [
+                16,
+                32,
+                64
+            ],
+            "name": "organoid_baseline",
+            "seq_len": [
+                50,
+                100
+            ],
             "track_features": "all"
         },
         {
-            "name": "organoid_feature_ablation",
-            "hidden_sizes": [
-                32
-            ],
-            "fusion_sizes": [
-                64
+            "batch_size": [
+                256
             ],
             "dropout": [
                 0.3
-            ],
-            "seq_len": [
-                100
-            ],
-            "batch_size": [
-                256
             ],
             "epochs": [
                 200
@@ -61,6 +51,16 @@
                 "perimeter_circularity",
                 "all"
             ],
+            "fusion_sizes": [
+                64
+            ],
+            "hidden_sizes": [
+                32
+            ],
+            "name": "organoid_feature_ablation",
+            "seq_len": [
+                100
+            ],
             "track_features": [
                 "displacement_only",
                 "all"
@@ -69,50 +69,50 @@
     ],
     "til_experiments": [
         {
-            "name": "til_baseline",
-            "intermediate_features": [
-                256,
-                512,
-                1024
+            "batch_size": [
+                16,
+                32
             ],
             "dropout_prob": [
                 0.3,
                 0.5
             ],
-            "batch_size": [
-                16,
-                32
-            ],
             "epochs": [
                 200,
                 400
             ],
-            "learning_rate": [
-                0.00025,
-                0.001
-            ]
-        },
-        {
-            "name": "til_architecture_test",
             "intermediate_features": [
-                512
-            ],
-            "second_intermediate_features": [
                 256,
                 512,
                 1024
             ],
-            "dropout_prob": [
-                0.3
+            "learning_rate": [
+                0.00025,
+                0.001
             ],
+            "name": "til_baseline"
+        },
+        {
             "batch_size": [
                 16
+            ],
+            "dropout_prob": [
+                0.3
             ],
             "epochs": [
                 200
             ],
+            "intermediate_features": [
+                512
+            ],
             "learning_rate": [
                 0.00025
+            ],
+            "name": "til_architecture_test",
+            "second_intermediate_features": [
+                256,
+                512,
+                1024
             ]
         }
     ]
