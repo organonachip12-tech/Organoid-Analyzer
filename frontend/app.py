@@ -20,23 +20,45 @@ matplotlib.use('Agg')  # Use non-interactive backend
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-app = Flask(__name__)
+# Get paths relative to this file's location
+FRONTEND_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(FRONTEND_DIR)
+
+app = Flask(__name__, 
+            template_folder=os.path.join(FRONTEND_DIR, 'templates'),
+            static_folder=os.path.join(FRONTEND_DIR, 'static'))
 CORS(app)
 
 # Global state for running experiments
 running_experiments = {}
 experiment_status = {}
 
-CONFIG_PATH = "experiments_config.json"
-RESULTS_DIR = "./experiments_results"
+CONFIG_PATH = os.path.join(FRONTEND_DIR, "experiments_config.json")
+RESULTS_DIR = os.path.join(PROJECT_ROOT, "results", "experiments")
 
 def load_config():
     """Load experiment configuration."""
     try:
         with open(CONFIG_PATH, 'r') as f:
-            return json.load(f)
+            config = json.load(f)
+            # Remove any error key that might have been saved incorrectly
+            if "error" in config:
+                del config["error"]
+            return config
     except FileNotFoundError:
-        return {"error": "Config file not found"}
+        # Return a valid default config instead of an error object
+        default_config = {
+            "global_settings": {
+                "max_parallel_experiments": 2,
+                "output_dir": os.path.join(PROJECT_ROOT, "results", "experiments"),
+                "log_level": "INFO"
+            },
+            "organoid_experiments": [],
+            "til_experiments": []
+        }
+        # Save the default config so it exists for next time
+        save_config(default_config)
+        return default_config
 
 def save_config(config):
     """Save experiment configuration."""
@@ -112,107 +134,108 @@ def run_experiments_async(analyzer_type, test_mode, job_id):
         
         # Run Organoid experiments
         if analyzer_type in ["organoid", "all"]:
-            original_cwd = os.getcwd()
-            try:
-                os.chdir("Organoid Analyzer")
+            all_experiments = []
+            for experiment_config in config.get("organoid_experiments", []):
+                combinations = generate_combinations(experiment_config, test_mode)
+                for i, combination in enumerate(combinations):
+                    experiment_id = f"organoid_{experiment_config['name']}_{i+1}"
+                    output_dir = os.path.join(RESULTS_DIR, experiment_id)
+                    all_experiments.append((experiment_id, combination, output_dir))
+            
+            experiments_to_run = []
+            for experiment_id, combination, output_dir in all_experiments:
+                if not check_experiment_exists(output_dir, "organoid"):
+                    experiments_to_run.append((experiment_id, combination, output_dir))
+            
+            total += len(experiments_to_run)
+            experiment_status[job_id]["total"] = total
+            
+            for idx, (experiment_id, combination, output_dir) in enumerate(experiments_to_run):
+                experiment_status[job_id]["current"] = f"Running {experiment_id}"
+                experiment_status[job_id]["progress"] = int((idx / len(experiments_to_run)) * 100) if experiments_to_run else 0
                 
-                all_experiments = []
-                for experiment_config in config.get("organoid_experiments", []):
-                    combinations = generate_combinations(experiment_config, test_mode)
-                    for i, combination in enumerate(combinations):
-                        experiment_id = f"organoid_{experiment_config['name']}_{i+1}"
-                        output_dir = f"../experiments_results/{experiment_id}"
-                        all_experiments.append((experiment_id, combination, output_dir))
+                cmd = [
+                    "python", "-m", "organoid_analyzer.training.train_and_test_models",
+                    "--seq_len", str(combination.get('seq_len', 100)),
+                    "--epochs", str(combination.get('epochs', 400)),
+                    "--batch_size", str(combination.get('batch_size', 256)),
+                    "--dropout", str(combination.get('dropout', 0.3)),
+                    "--hidden_sizes", str(combination.get('hidden_sizes', 32)),
+                    "--fusion_sizes", str(combination.get('fusion_sizes', 64)),
+                    "--model_type", str(combination.get('model_type', 'fusion')),
+                    "--dataset", str(combination.get('dataset', 'all')),
+                    "--output_dir", str(output_dir)
+                ]
                 
-                experiments_to_run = []
-                for experiment_id, combination, output_dir in all_experiments:
-                    if not check_experiment_exists(output_dir, "organoid"):
-                        experiments_to_run.append((experiment_id, combination, output_dir))
+                # Run from project root so module imports work
+                result = subprocess.run(cmd, capture_output=True, text=True, cwd=PROJECT_ROOT)
                 
-                total += len(experiments_to_run)
-                experiment_status[job_id]["total"] = total
+                # Check if experiment actually produced results (more reliable than return code)
+                experiment_succeeded = result.returncode == 0 or check_experiment_exists(output_dir, "organoid")
                 
-                for idx, (experiment_id, combination, output_dir) in enumerate(experiments_to_run):
-                    experiment_status[job_id]["current"] = f"Running {experiment_id}"
-                    experiment_status[job_id]["progress"] = int((idx / len(experiments_to_run)) * 100) if experiments_to_run else 0
-                    
-                    cmd = [
-                        "python", "train_and_test_models.py",
-                        "--seq_len", str(combination.get('seq_len', 100)),
-                        "--epochs", str(combination.get('epochs', 400)),
-                        "--batch_size", str(combination.get('batch_size', 256)),
-                        "--dropout", str(combination.get('dropout', 0.3)),
-                        "--hidden_sizes", str(combination.get('hidden_sizes', 32)),
-                        "--fusion_sizes", str(combination.get('fusion_sizes', 64)),
-                        "--output_dir", str(output_dir)
-                    ]
-                    
-                    result = subprocess.run(cmd, capture_output=True, text=True)
-                    
-                    if result.returncode == 0:
-                        completed += 1
-                        experiment_status[job_id]["logs"].append(f"✅ {experiment_id} completed")
-                    else:
-                        failed += 1
-                        experiment_status[job_id]["logs"].append(f"❌ {experiment_id} failed: {result.stderr[:200]}")
-                    
-                    experiment_status[job_id]["completed"] = completed
-                    experiment_status[job_id]["failed"] = failed
-                    
-            finally:
-                os.chdir(original_cwd)
+                if experiment_succeeded:
+                    completed += 1
+                    experiment_status[job_id]["logs"].append(f"✅ {experiment_id} completed")
+                else:
+                    failed += 1
+                    error_msg = result.stderr[:200] if result.stderr else "Unknown error"
+                    experiment_status[job_id]["logs"].append(f"❌ {experiment_id} failed: {error_msg}")
+                
+                experiment_status[job_id]["completed"] = completed
+                experiment_status[job_id]["failed"] = failed
         
         # Run TIL experiments
         if analyzer_type in ["til", "all"]:
-            original_cwd = os.getcwd()
-            try:
-                os.chdir("TIL-Analyzer-main")
+            all_experiments = []
+            for experiment_config in config.get("til_experiments", []):
+                combinations = generate_combinations(experiment_config, test_mode)
+                for i, combination in enumerate(combinations):
+                    experiment_id = f"til_{experiment_config['name']}_{i+1}"
+                    output_dir = os.path.join(RESULTS_DIR, experiment_id)
+                    all_experiments.append((experiment_id, combination, output_dir))
+            
+            experiments_to_run = []
+            for experiment_id, combination, output_dir in all_experiments:
+                if not check_experiment_exists(output_dir, "til"):
+                    experiments_to_run.append((experiment_id, combination, output_dir))
+            
+            total += len(experiments_to_run)
+            experiment_status[job_id]["total"] = total
+            
+            for idx, (experiment_id, combination, output_dir) in enumerate(experiments_to_run):
+                experiment_status[job_id]["current"] = f"Running {experiment_id}"
+                experiment_status[job_id]["progress"] = int(((completed + idx) / total) * 100) if total > 0 else 0
                 
-                all_experiments = []
-                for experiment_config in config.get("til_experiments", []):
-                    combinations = generate_combinations(experiment_config, test_mode)
-                    for i, combination in enumerate(combinations):
-                        experiment_id = f"til_{experiment_config['name']}_{i+1}"
-                        output_dir = f"../experiments_results/{experiment_id}"
-                        all_experiments.append((experiment_id, combination, output_dir))
+                cmd = [
+                    "python", os.path.join(PROJECT_ROOT, "til_analyzer", "main_test.py"),
+                    "--intermediate_features", str(combination.get('intermediate_features', 512)),
+                    "--second_intermediate_features", str(combination.get('second_intermediate_features', 512)),
+                    "--dropout_prob", str(combination.get('dropout_prob', 0.5)),
+                    "--batch_size", str(combination.get('batch_size', 16)),
+                    "--epochs", str(combination.get('epochs', 200)),
+                    "--learning_rate", str(combination.get('learning_rate', 0.00025)),
+                    "--model_type", str(combination.get('model_type', 'resnet18')),
+                    "--dataset", str(combination.get('dataset', 'chip')),
+                    "--output_dir", str(output_dir)
+                ]
                 
-                experiments_to_run = []
-                for experiment_id, combination, output_dir in all_experiments:
-                    if not check_experiment_exists(output_dir, "til"):
-                        experiments_to_run.append((experiment_id, combination, output_dir))
+                # Run from project root
+                result = subprocess.run(cmd, capture_output=True, text=True, cwd=PROJECT_ROOT)
                 
-                total += len(experiments_to_run)
-                experiment_status[job_id]["total"] = total
+                # Check if experiment actually produced results (more reliable than return code 
+                # since Python warnings go to stderr and can cause false failures)
+                experiment_succeeded = result.returncode == 0 or check_experiment_exists(output_dir, "til")
                 
-                for idx, (experiment_id, combination, output_dir) in enumerate(experiments_to_run):
-                    experiment_status[job_id]["current"] = f"Running {experiment_id}"
-                    experiment_status[job_id]["progress"] = int(((completed + idx) / total) * 100) if total > 0 else 0
-                    
-                    cmd = [
-                        "python", "main_test.py",
-                        "--intermediate_features", str(combination.get('intermediate_features', 512)),
-                        "--second_intermediate_features", str(combination.get('second_intermediate_features', 512)),
-                        "--dropout_prob", str(combination.get('dropout_prob', 0.5)),
-                        "--batch_size", str(combination.get('batch_size', 16)),
-                        "--epochs", str(combination.get('epochs', 200)),
-                        "--learning_rate", str(combination.get('learning_rate', 0.00025)),
-                        "--output_dir", str(output_dir)
-                    ]
-                    
-                    result = subprocess.run(cmd, capture_output=True, text=True)
-                    
-                    if result.returncode == 0:
-                        completed += 1
-                        experiment_status[job_id]["logs"].append(f"✅ {experiment_id} completed")
-                    else:
-                        failed += 1
-                        experiment_status[job_id]["logs"].append(f"❌ {experiment_id} failed: {result.stderr[:200]}")
-                    
-                    experiment_status[job_id]["completed"] = completed
-                    experiment_status[job_id]["failed"] = failed
-                    
-            finally:
-                os.chdir(original_cwd)
+                if experiment_succeeded:
+                    completed += 1
+                    experiment_status[job_id]["logs"].append(f"✅ {experiment_id} completed")
+                else:
+                    failed += 1
+                    error_msg = result.stderr[:200] if result.stderr else "Unknown error"
+                    experiment_status[job_id]["logs"].append(f"❌ {experiment_id} failed: {error_msg}")
+                
+                experiment_status[job_id]["completed"] = completed
+                experiment_status[job_id]["failed"] = failed
         
         experiment_status[job_id]["status"] = "completed"
         experiment_status[job_id]["progress"] = 100

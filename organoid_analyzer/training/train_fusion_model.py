@@ -940,7 +940,21 @@ def train_models_and_shap(
     min_pow_hidden,
     min_pow_fusion,
     perform_SHAP_analysis=True,
+    model_type="fusion",
+    dataset="all",
 ):
+
+    # Log model and dataset selection
+    print(f"[CONFIG] Model type: {model_type}")
+    print(f"[CONFIG] Dataset: {dataset}")
+    
+    # Note: model_type and dataset selection are logged but full implementation 
+    # of different model types (e.g., random_forest) requires additional work.
+    # Currently supports: fusion model with all datasets combined.
+    if model_type == "random_forest":
+        print("[WARNING] Random Forest model not yet fully implemented. Using fusion model instead.")
+    if dataset != "all":
+        print(f"[WARNING] Dataset filtering to '{dataset}' not yet fully implemented. Using all datasets.")
 
     summary_train_acc = {}
     summary_val_acc = {}

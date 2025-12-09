@@ -1,37 +1,31 @@
 {
     "global_settings": {
-        "log_level": "INFO",
         "max_parallel_experiments": 2,
-        "output_dir": "./experiments_results"
+        "output_dir": "./experiments_results",
+        "log_level": "INFO"
     },
     "organoid_experiments": [
         {
             "batch_size": [
-                128,
                 256
             ],
+            "dataset": "all",
             "dropout": [
-                0.3,
-                0.5
+                0.3
             ],
             "epochs": [
-                200,
-                400
+                200
             ],
             "features": "all",
             "fusion_sizes": [
-                32,
-                64,
-                128
-            ],
-            "hidden_sizes": [
-                16,
-                32,
                 64
             ],
-            "name": "organoid_baseline",
+            "hidden_sizes": [
+                32
+            ],
+            "model_type": "fusion",
+            "name": "organoid_experiment_1",
             "seq_len": [
-                50,
                 100
             ],
             "track_features": "all"
@@ -40,64 +34,36 @@
             "batch_size": [
                 256
             ],
+            "dataset": "all",
             "dropout": [
                 0.3
             ],
             "epochs": [
                 200
             ],
-            "features": [
-                "area_speed",
-                "perimeter_circularity",
-                "all"
-            ],
+            "features": "all",
             "fusion_sizes": [
                 64
             ],
             "hidden_sizes": [
                 32
             ],
-            "name": "organoid_feature_ablation",
+            "model_type": "fusion",
+            "name": "organoid_experiment_2",
             "seq_len": [
                 100
             ],
-            "track_features": [
-                "displacement_only",
-                "all"
-            ]
+            "track_features": "all"
         }
     ],
     "til_experiments": [
         {
             "batch_size": [
-                16,
-                32
-            ],
-            "dropout_prob": [
-                0.3,
-                0.5
-            ],
-            "epochs": [
-                200,
-                400
-            ],
-            "intermediate_features": [
-                256,
-                512,
-                1024
-            ],
-            "learning_rate": [
-                0.00025,
-                0.001
-            ],
-            "name": "til_baseline"
-        },
-        {
-            "batch_size": [
                 16
             ],
+            "dataset": "chip",
             "dropout_prob": [
-                0.3
+                0.5
             ],
             "epochs": [
                 200
@@ -108,11 +74,47 @@
             "learning_rate": [
                 0.00025
             ],
-            "name": "til_architecture_test",
-            "second_intermediate_features": [
-                256,
-                512,
-                1024
+            "model_type": "resnet18",
+            "name": "til_experiment_1"
+        },
+        {
+            "batch_size": [
+                16
+            ],
+            "dataset": "chip",
+            "dropout_prob": [
+                0.5
+            ],
+            "epochs": [
+                200
+            ],
+            "intermediate_features": [
+                512
+            ],
+            "learning_rate": [
+                0.00025
+            ],
+            "model_type": "resnet18",
+            "name": "til_experiment_2"
+        },
+        {
+            "name": "til_experiment_3",
+            "model_type": "resnet18",
+            "dataset": "chip",
+            "intermediate_features": [
+                512
+            ],
+            "dropout_prob": [
+                0.5
+            ],
+            "batch_size": [
+                16
+            ],
+            "epochs": [
+                200
+            ],
+            "learning_rate": [
+                0.00025
             ]
         }
     ]

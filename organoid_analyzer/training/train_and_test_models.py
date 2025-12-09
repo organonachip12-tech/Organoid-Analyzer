@@ -23,6 +23,8 @@ def main():
     parser.add_argument("--dropout", type=float, default=DROPOUT, help="Dropout rate")
     parser.add_argument("--hidden_sizes", type=int, default=256, help="Hidden layer size")
     parser.add_argument("--fusion_sizes", type=int, default=128, help="Fusion layer size")
+    parser.add_argument("--model_type", type=str, default="fusion", choices=["fusion", "random_forest"], help="Model type")
+    parser.add_argument("--dataset", type=str, default="all", choices=["all", "2ND", "CAF", "CART", "PDO"], help="Dataset to use")
     parser.add_argument("--output_dir", help="Output directory for results")
 
     args = parser.parse_args()
@@ -32,6 +34,8 @@ def main():
     max_epochs = args.epochs
     batch_size = args.batch_size
     dropout = args.dropout
+    model_type = args.model_type
+    dataset = args.dataset
 
     max_pow_hidden = args.hidden_sizes.bit_length() - 1
     min_pow_hidden = max_pow_hidden - 1
@@ -46,6 +50,9 @@ def main():
         # as the CLI-level folder; your training code still uses config.RESULTS_DIR.
         # If you want results_dir to replace RESULTS_DIR, you can update config.
 
+    # Log selected model and dataset
+    print(f"Training with model_type={model_type}, dataset={dataset}")
+
     train_models_and_shap(
         ABLATION_CONFIGS,
         SEQ_DATASET_PATH,
@@ -56,6 +63,8 @@ def main():
         min_pow_hidden,
         min_pow_fusion,
         perform_SHAP_analysis=False,
+        model_type=model_type,
+        dataset=dataset,
     )
 
 

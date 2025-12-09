@@ -80,6 +80,25 @@ function createOrganoidExperimentForm(exp, idx) {
         </div>
         <div class="form-row">
             <div class="form-group">
+                <label>Model Type:</label>
+                <select class="form-control" onchange="updateOrganoidExperiment(${idx}, 'model_type', this.value)">
+                    <option value="fusion" ${exp.model_type === 'fusion' || !exp.model_type ? 'selected' : ''}>Fusion (LSTM + MLP)</option>
+                    <option value="random_forest" ${exp.model_type === 'random_forest' ? 'selected' : ''}>Random Forest</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Dataset:</label>
+                <select class="form-control" onchange="updateOrganoidExperiment(${idx}, 'dataset', this.value)">
+                    <option value="all" ${exp.dataset === 'all' || !exp.dataset ? 'selected' : ''}>All Datasets</option>
+                    <option value="2ND" ${exp.dataset === '2ND' ? 'selected' : ''}>2ND</option>
+                    <option value="CAF" ${exp.dataset === 'CAF' ? 'selected' : ''}>CAF</option>
+                    <option value="CART" ${exp.dataset === 'CART' ? 'selected' : ''}>CART</option>
+                    <option value="PDO" ${exp.dataset === 'PDO' ? 'selected' : ''}>PDO</option>
+                </select>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
                 <label>Hidden Sizes (comma-separated):</label>
                 <input type="text" class="form-control" 
                        value="${Array.isArray(exp.hidden_sizes) ? exp.hidden_sizes.join(', ') : exp.hidden_sizes || ''}"
@@ -151,6 +170,23 @@ function createTILExperimentForm(exp, idx) {
                 <label>Name:</label>
                 <input type="text" class="form-control exp-name" value="${exp.name || ''}"
                        onchange="updateTILExperiment(${idx}, 'name', this.value)">
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Model Architecture:</label>
+                <select class="form-control" onchange="updateTILExperiment(${idx}, 'model_type', this.value)">
+                    <option value="resnet18" ${exp.model_type === 'resnet18' || !exp.model_type ? 'selected' : ''}>ResNet-18 (Default)</option>
+                    <option value="resnet34" ${exp.model_type === 'resnet34' ? 'selected' : ''}>ResNet-34</option>
+                    <option value="resnet50" ${exp.model_type === 'resnet50' ? 'selected' : ''}>ResNet-50</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Dataset:</label>
+                <select class="form-control" onchange="updateTILExperiment(${idx}, 'dataset', this.value)">
+                    <option value="chip" ${exp.dataset === 'chip' || !exp.dataset ? 'selected' : ''}>Chip Images (Default)</option>
+                    <option value="clinical" ${exp.dataset === 'clinical' ? 'selected' : ''}>Clinical Images</option>
+                </select>
             </div>
         </div>
         <div class="form-row">
@@ -249,6 +285,8 @@ function addOrganoidExperiment() {
     if (!currentConfig.organoid_experiments) currentConfig.organoid_experiments = [];
     currentConfig.organoid_experiments.push({
         name: `organoid_experiment_${currentConfig.organoid_experiments.length + 1}`,
+        model_type: 'fusion',
+        dataset: 'all',
         hidden_sizes: [32],
         fusion_sizes: [64],
         dropout: [0.3],
@@ -265,6 +303,8 @@ function addTILExperiment() {
     if (!currentConfig.til_experiments) currentConfig.til_experiments = [];
     currentConfig.til_experiments.push({
         name: `til_experiment_${currentConfig.til_experiments.length + 1}`,
+        model_type: 'resnet18',
+        dataset: 'chip',
         intermediate_features: [512],
         dropout_prob: [0.5],
         batch_size: [16],

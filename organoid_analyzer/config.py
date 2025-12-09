@@ -4,12 +4,20 @@ import os
 # ROOT DIRECTORIES
 # ============================================================
 
-ROOT_DIR = os.path.dirname(os.path.abspath(__file__)) 
+# Package directory (organoid_analyzer/)
+PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-DATA_DIR = os.path.join(ROOT_DIR, "data")
-RAW_DATA_DIR = os.path.join(DATA_DIR, "Raw")       # Only NCI9 raw TIFFs
-GENERATED_DIR = os.path.join(DATA_DIR, "Generated")
-RESULTS_DIR = os.path.join(ROOT_DIR, "results")
+# Project root directory (one level up from package)
+PROJECT_ROOT = os.path.dirname(PACKAGE_DIR)
+
+# Data is stored in the unified data/ folder
+DATA_DIR = os.path.join(PROJECT_ROOT, "data", "organoid")
+RAW_DATA_DIR = os.path.join(DATA_DIR, "raw")
+ANNOTATIONS_DIR = os.path.join(DATA_DIR, "annotations")
+GENERATED_DIR = os.path.join(DATA_DIR, "generated")
+
+# Results go to the unified results/ folder
+RESULTS_DIR = os.path.join(PROJECT_ROOT, "results", "organoid")
 
 os.makedirs(GENERATED_DIR, exist_ok=True)
 os.makedirs(RESULTS_DIR, exist_ok=True)
@@ -30,7 +38,7 @@ SEQ_LEN = 100
 SEQ_DATASET_PATH = os.path.join(GENERATED_DIR, f"trajectory_dataset_{SEQ_LEN}.npz")
 TRACK_DATASET_PATH = os.path.join(GENERATED_DIR, "track_dataset.npz")
 
-TEST_TRAIN_SPLIT_ANNOTATION_PATH = os.path.join(DATA_DIR, "Annotations.xlsx")
+TEST_TRAIN_SPLIT_ANNOTATION_PATH = os.path.join(ANNOTATIONS_DIR, "Annotations.xlsx")
 
 # ============================================================
 # FEATURES
@@ -68,11 +76,11 @@ ABLATION_CONFIGS = {
 # ============================================================
 
 PROCESSED_DATA_FOLDERS = {
-    "2ND": os.path.join(DATA_DIR, "2ND"),
-    "CAF": os.path.join(DATA_DIR, "CAF"),
-    "CART": os.path.join(DATA_DIR, "CART"),
-    "NCI9": os.path.join(DATA_DIR, "NCI9"),
-    "PDO": os.path.join(DATA_DIR, "PDO"),
+    "2ND": os.path.join(RAW_DATA_DIR, "2ND"),
+    "CAF": os.path.join(RAW_DATA_DIR, "CAF"),
+    "CART": os.path.join(RAW_DATA_DIR, "CART"),
+    "NCI9": os.path.join(RAW_DATA_DIR, "NCI9"),
+    "PDO": os.path.join(RAW_DATA_DIR, "PDO"),
 }
 
 # ============================================================

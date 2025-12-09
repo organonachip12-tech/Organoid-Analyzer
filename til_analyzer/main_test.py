@@ -563,10 +563,18 @@ def main(output_dir=None):
     breaks=np.arange(0.,365.*3,365./7)
     num_intervals=len(breaks)-1
 
-    high_surv_annotations = "./Data/chip annotations/annotations_chip_high_surv_corrected.csv"
-    med_surv_annotations = "./Data/chip annotations/annotations_chip_med_surv_corrected.csv"
-    low_surv_annotations = "./Data/chip annotations/annotations_chip_low_surv_corrected.csv"
-    train_annotations_path = './Data/chip annotations/combined_training_corrected.csv'
+    # Get the directory where this script is located
+    SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+    PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+    
+    # Data is stored in the unified data/til/ folder
+    TIL_DATA_DIR = os.path.join(PROJECT_ROOT, "data", "til")
+    TIL_ANNOTATIONS_DIR = os.path.join(TIL_DATA_DIR, "annotations")
+
+    high_surv_annotations = os.path.join(TIL_ANNOTATIONS_DIR, "annotations_chip_high_surv_corrected.csv")
+    med_surv_annotations = os.path.join(TIL_ANNOTATIONS_DIR, "annotations_chip_med_surv_corrected.csv")
+    low_surv_annotations = os.path.join(TIL_ANNOTATIONS_DIR, "annotations_chip_low_surv_corrected.csv")
+    train_annotations_path = os.path.join(TIL_ANNOTATIONS_DIR, "combined_training_corrected.csv")
 
     h_images, h_survival_times, h_censoreds = get_data(high_surv_annotations)
     m_images, m_survival_times, m_censoreds = get_data(med_surv_annotations)
@@ -613,7 +621,7 @@ def main(output_dir=None):
     raw_train_data_loader = DataLoader(raw_train_dataset, batch_size, shuffle=True)
 
     save_model_filepath = [
-        "./Data/epoch 75.pt"
+        os.path.join(TIL_DATA_DIR, "models", "epoch 75.pt")
     ] 
     models = []
 
@@ -649,6 +657,8 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size")
     parser.add_argument("--epochs", type=int, default=200, help="Number of epochs")
     parser.add_argument("--learning_rate", type=float, default=0.00025, help="Learning rate")
+    parser.add_argument("--model_type", type=str, default="resnet18", choices=["resnet18", "resnet34", "resnet50"], help="Model architecture")
+    parser.add_argument("--dataset", type=str, default="chip", choices=["chip", "clinical"], help="Dataset to use")
     
     # Output
     parser.add_argument("--output_dir", help="Output directory for results")
@@ -663,6 +673,19 @@ if __name__ == "__main__":
     batch_size = args.batch_size
     epochs = args.epochs
     learning_rate = args.learning_rate
+    model_type = args.model_type
+    dataset = args.dataset
+    
+    # Log model and dataset selection
+    print(f"[CONFIG] Model type: {model_type}")
+    print(f"[CONFIG] Dataset: {dataset}")
+    
+    # Note: model_type and dataset selection are logged but full implementation
+    # of different model architectures (resnet34, resnet50) requires additional work.
+    if model_type != "resnet18":
+        print(f"[WARNING] {model_type} not yet fully implemented. Using resnet18 instead.")
+    if dataset != "chip":
+        print(f"[WARNING] Dataset '{dataset}' not yet fully implemented. Using chip dataset.")
     
     # Override output directory if provided
     if args.output_dir:
