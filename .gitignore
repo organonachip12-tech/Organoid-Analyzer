@@ -1,3 +1,45 @@
+# Virtual environments
+venv/
+*.venv/
+organoid_venv/
+.env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Data folders (should not be in GitHub!)
+data/
+Data/
+Raw/
+Generated/
+Results/
+results/
+TIL-Analyzer-main/images/
+TIL-Analyzer-main/chip annotations/
+
+# Models and checkpoints
+*.pth
+*.pt
+*.ckpt
+Generated/models/
+
+# Logs
+*.log
+logs/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# OS files
+.DS_Store
+
+# Fiji build folder if ever generated
+Fiji.app/
+
+
 ./organoid-til-env/
 experiments_results/
 .DS_Store
