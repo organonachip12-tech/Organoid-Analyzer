@@ -10,8 +10,8 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
-from ..config import DROPOUT
-from ..models.unified_fusion import UnifiedFusionModel
+from organoid_analyzer.config import DROPOUT
+from organoid_analyzer.models.unified_fusion import UnifiedFusionModel
 
 torch.backends.cudnn.enabled = False
 

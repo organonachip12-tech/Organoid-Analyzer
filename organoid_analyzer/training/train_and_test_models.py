@@ -1,7 +1,14 @@
 import argparse
 import os
+import sys
 
-from ..config import (
+# Allow running as script from frontend/CLI (project root must be on path)
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+_project_root = os.path.dirname(os.path.dirname(_script_dir))
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+
+from organoid_analyzer.config import (
     SEQ_LEN,
     MAX_EPOCHS,
     BATCH_SIZE,
@@ -11,7 +18,7 @@ from ..config import (
     TRACK_DATASET_PATH,
     TEST_TRAIN_SPLIT_ANNOTATION_PATH,
 )
-from .train_fusion_model import train_models_and_shap
+from organoid_analyzer.training.train_fusion_model import train_models_and_shap
 
 
 def main():

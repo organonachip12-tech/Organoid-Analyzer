@@ -6,6 +6,7 @@ Flask Web Frontend for Experiment Management
 import json
 import os
 import subprocess
+import sys
 import threading
 import time
 import itertools
@@ -155,7 +156,8 @@ def run_experiments_async(analyzer_type, test_mode, job_id):
                 experiment_status[job_id]["progress"] = int((idx / len(experiments_to_run)) * 100) if experiments_to_run else 0
                 
                 cmd = [
-                    "python", "-m", "organoid_analyzer.training.train_and_test_models",
+                    sys.executable,
+                    os.path.join(PROJECT_ROOT, "organoid_analyzer", "training", "train_and_test_models.py"),
                     "--seq_len", str(combination.get('seq_len', 100)),
                     "--epochs", str(combination.get('epochs', 400)),
                     "--batch_size", str(combination.get('batch_size', 256)),
@@ -166,8 +168,6 @@ def run_experiments_async(analyzer_type, test_mode, job_id):
                     "--dataset", str(combination.get('dataset', 'all')),
                     "--output_dir", str(output_dir)
                 ]
-                
-                # Run from project root so module imports work
                 result = subprocess.run(cmd, capture_output=True, text=True, cwd=PROJECT_ROOT)
                 
                 # Check if experiment actually produced results (more reliable than return code)
@@ -178,7 +178,13 @@ def run_experiments_async(analyzer_type, test_mode, job_id):
                     experiment_status[job_id]["logs"].append(f"✅ {experiment_id} completed")
                 else:
                     failed += 1
-                    error_msg = result.stderr[:200] if result.stderr else "Unknown error"
+                    err = (result.stderr or "").strip()
+                    out = (result.stdout or "").strip()
+                    error_msg = err if err else "Unknown error"
+                    if len(error_msg) > 2000:
+                        error_msg = error_msg[:2000] + "\n... (truncated)"
+                    if out:
+                        error_msg = error_msg + "\n[stdout]\n" + (out[:500] if len(out) > 500 else out)
                     experiment_status[job_id]["logs"].append(f"❌ {experiment_id} failed: {error_msg}")
                 
                 experiment_status[job_id]["completed"] = completed
@@ -207,7 +213,8 @@ def run_experiments_async(analyzer_type, test_mode, job_id):
                 experiment_status[job_id]["progress"] = int(((completed + idx) / total) * 100) if total > 0 else 0
                 
                 cmd = [
-                    "python", os.path.join(PROJECT_ROOT, "til_analyzer", "main_test.py"),
+                    sys.executable,
+                    os.path.join(PROJECT_ROOT, "til_analyzer", "main_test.py"),
                     "--intermediate_features", str(combination.get('intermediate_features', 512)),
                     "--second_intermediate_features", str(combination.get('second_intermediate_features', 512)),
                     "--dropout_prob", str(combination.get('dropout_prob', 0.5)),
@@ -231,7 +238,13 @@ def run_experiments_async(analyzer_type, test_mode, job_id):
                     experiment_status[job_id]["logs"].append(f"✅ {experiment_id} completed")
                 else:
                     failed += 1
-                    error_msg = result.stderr[:200] if result.stderr else "Unknown error"
+                    err = (result.stderr or "").strip()
+                    out = (result.stdout or "").strip()
+                    error_msg = err if err else "Unknown error"
+                    if len(error_msg) > 2000:
+                        error_msg = error_msg[:2000] + "\n... (truncated)"
+                    if out:
+                        error_msg = error_msg + "\n[stdout]\n" + (out[:500] if len(out) > 500 else out)
                     experiment_status[job_id]["logs"].append(f"❌ {experiment_id} failed: {error_msg}")
                 
                 experiment_status[job_id]["completed"] = completed
