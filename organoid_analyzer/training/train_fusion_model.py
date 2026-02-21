@@ -942,7 +942,11 @@ def train_models_and_shap(
     perform_SHAP_analysis=True,
     model_type="fusion",
     dataset="all",
+    results_dir=None,
 ):
+
+    # Use provided results_dir (e.g. from frontend output_dir) or fall back to config
+    base_dir = results_dir if results_dir else RESULTS_DIR
 
     # Log model and dataset selection
     print(f"[CONFIG] Model type: {model_type}")
@@ -966,7 +970,7 @@ def train_models_and_shap(
         print(f"\n===== Running Ablation: {name} =====")
 
         prefix = f"ablation_{name}"
-        result_path = os.path.join(RESULTS_DIR, prefix)
+        result_path = os.path.join(base_dir, prefix)
         os.makedirs(result_path, exist_ok=True)
 
         seq_input_size = len(cfg["features"])
@@ -980,7 +984,7 @@ def train_models_and_shap(
                 print(f"Hidden Size: {hidden_size} | Fusion Size {fusion_size}")
 
                 model_path = os.path.join(
-                    RESULTS_DIR,
+                    base_dir,
                     f"{prefix}/models/{prefix}_hidden{hidden_size}_fusion{fusion_size}.pth",
                 )
                 os.makedirs(os.path.dirname(model_path), exist_ok=True)
@@ -1032,7 +1036,7 @@ def train_models_and_shap(
     from datetime import datetime
 
     date_str = datetime.now().strftime("%m_%d")
-    acc_dir = os.path.join(RESULTS_DIR, "ablation_Specify", "accuracies", date_str)
+    acc_dir = os.path.join(base_dir, "ablation_Specify", "accuracies", date_str)
     os.makedirs(acc_dir, exist_ok=True)
 
     def save_summary_csv(filename, header, data_dict):

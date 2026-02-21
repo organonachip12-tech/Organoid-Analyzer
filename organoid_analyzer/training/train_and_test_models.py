@@ -53,9 +53,6 @@ def main():
     results_dir = args.output_dir
     if results_dir:
         os.makedirs(results_dir, exist_ok=True)
-        # We don't override global RESULTS_DIR here, we just pass output_dir
-        # as the CLI-level folder; your training code still uses config.RESULTS_DIR.
-        # If you want results_dir to replace RESULTS_DIR, you can update config.
 
     # Log selected model and dataset
     print(f"Training with model_type={model_type}, dataset={dataset}")
@@ -72,6 +69,7 @@ def main():
         perform_SHAP_analysis=False,
         model_type=model_type,
         dataset=dataset,
+        results_dir=results_dir,
     )
 
 

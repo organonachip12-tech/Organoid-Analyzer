@@ -27,6 +27,17 @@ function showTab(tabName, buttonElement) {
     if (tabName === 'results') {
         loadResults();
     }
+    
+    // When switching back to Run tab with an active job, refresh status immediately
+    // so the progress bar displays correctly (avoids stale display after tab was hidden)
+    if (tabName === 'run' && currentJobId) {
+        fetch(`/api/experiments/status/${currentJobId}`)
+            .then(r => r.json())
+            .then(status => {
+                if (!status.error) updateStatusDisplay(status);
+            })
+            .catch(() => {});
+    }
 }
 
 // Configuration management
