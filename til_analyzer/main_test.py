@@ -571,10 +571,27 @@ def main(output_dir=None):
     TIL_DATA_DIR = os.path.join(PROJECT_ROOT, "data", "til")
     TIL_ANNOTATIONS_DIR = os.path.join(TIL_DATA_DIR, "annotations")
 
-    high_surv_annotations = os.path.join(TIL_ANNOTATIONS_DIR, "annotations_chip_high_surv_corrected.csv")
-    med_surv_annotations = os.path.join(TIL_ANNOTATIONS_DIR, "annotations_chip_med_surv_corrected.csv")
-    low_surv_annotations = os.path.join(TIL_ANNOTATIONS_DIR, "annotations_chip_low_surv_corrected.csv")
-    train_annotations_path = os.path.join(TIL_ANNOTATIONS_DIR, "combined_training_corrected.csv")
+    if not os.path.isdir(TIL_ANNOTATIONS_DIR):
+        raise FileNotFoundError(
+            f"TIL annotations directory not found: {TIL_ANNOTATIONS_DIR}\n"
+            f"Create it and add CSV files: annotations_chip_high_surv_corrected.csv (or annotations_chip_high_surv.csv), "
+            "annotations_chip_med_surv*.csv, annotations_chip_low_surv*.csv, combined_training_corrected.csv (or combined_training.csv)."
+        )
+
+    def _annotation_path(primary, fallback=None):
+        p = os.path.join(TIL_ANNOTATIONS_DIR, primary)
+        if os.path.isfile(p):
+            return p
+        if fallback:
+            alt = os.path.join(TIL_ANNOTATIONS_DIR, fallback)
+            if os.path.isfile(alt):
+                return alt
+        return p
+
+    high_surv_annotations = _annotation_path("annotations_chip_high_surv_corrected.csv", "annotations_chip_high_surv.csv")
+    med_surv_annotations = _annotation_path("annotations_chip_med_surv_corrected.csv", "annotations_chip_med_surv.csv")
+    low_surv_annotations = _annotation_path("annotations_chip_low_surv_corrected.csv", "annotations_chip_low_surv.csv")
+    train_annotations_path = _annotation_path("combined_training_corrected.csv", "combined_training.csv")
 
     h_images, h_survival_times, h_censoreds = get_data(high_surv_annotations)
     m_images, m_survival_times, m_censoreds = get_data(med_surv_annotations)
