@@ -1,0 +1,6 @@
+case_id,file_name,project_id,survival_time,vital_status,days_to_death,days_to_last_follow_up
+TCGA-A1-A0SD,TCGA-A1-A0SD-01Z-00-DX1.png,TCGA-BRCA,456,Dead,456,
+TCGA-A1-A0SE,TCGA-A1-A0SE-01Z-00-DX1.png,TCGA-BRCA,1095,Alive,,1095
+TCGA-A1-A0SF,TCGA-A1-A0SF-01Z-00-DX1.png,TCGA-BRCA,730,Dead,730,
+TCGA-A1-A0SG,TCGA-A1-A0SG-01Z-00-DX1.png,TCGA-BRCA,1825,Alive,,1825
+TCGA-A1-A0SH,TCGA-A1-A0SH-01Z-00-DX1.png,TCGA-BRCA,365,Dead,365,
