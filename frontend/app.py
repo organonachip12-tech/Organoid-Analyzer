@@ -12,7 +12,7 @@ import time
 import itertools
 from pathlib import Path
 from datetime import datetime
-from flask import Flask, render_template, jsonify, request, send_from_directory
+from flask import Flask, render_template, jsonify, request, send_from_directory, Response, stream_with_context
 from flask_cors import CORS
 import uuid
 import pandas as pd
@@ -563,6 +563,211 @@ def get_results_summary():
         if os.path.exists(summary_path):
             return send_from_directory(os.path.dirname(summary_path), os.path.basename(summary_path), mimetype='image/png')
         return jsonify({"error": "Summary not found"}), 404
+
+# ─── GigaTIME Tab ────────────────────────────────────────────────────────────
+
+import base64
+import io
+
+_gigatime_model = None
+_gigatime_device = None
+
+GIGATIME_CHANNELS = [
+    "DAPI", "TRITC", "Cy5", "PD-1", "CD14", "CD4", "T-bet", "CD34",
+    "CD68", "CD16", "CD11c", "CD138", "CD20", "CD3", "CD8", "PD-L1",
+    "CK", "Ki67", "Tryptase", "Actin-D", "Caspase3-D", "PHH3-B", "Transgelin"
+]
+
+
+def _load_gigatime_model():
+    global _gigatime_model, _gigatime_device
+    if _gigatime_model is not None:
+        return _gigatime_model, _gigatime_device
+    import torch
+    from gigatime_analyzer.models.archs import gigatime
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = gigatime(num_classes=23, input_channels=3)
+    # Compatibility shim for older PyTorch checkpoint serialization.
+    # The checkpoint pickle may reference arbitrary nested attrs/calls on this
+    # module, so we use a recursive stub that is both callable and attr-accessible.
+    import types as _types
+
+    class _Permissive:
+        """Object that returns itself for any attribute access or call."""
+        def __getattr__(self, name):
+            return _Permissive()
+        def __call__(self, *a, **kw):
+            return _Permissive()
+
+    class _PermissiveModule(_types.ModuleType):
+        def __getattr__(self, name):
+            return _Permissive()
+
+    if "torch.utils.serialization" not in sys.modules:
+        _ser_mod = _PermissiveModule("torch.utils.serialization")
+        _ser_config = _PermissiveModule("torch.utils.serialization.config")
+        _ser_mod.config = _ser_config
+        sys.modules["torch.utils.serialization"] = _ser_mod
+        sys.modules["torch.utils.serialization.config"] = _ser_config
+
+    ckpt_path = os.path.join(PROJECT_ROOT, "data", "gigatime", "model.pth")
+    if os.path.exists(ckpt_path):
+        state = torch.load(ckpt_path, map_location=device, weights_only=False)
+        model.load_state_dict(state)
+    else:
+        from huggingface_hub import hf_hub_download
+        hf_token = os.environ.get("HF_TOKEN")
+        ckpt_path = hf_hub_download(
+            repo_id="prov-gigatime/GigaTIME",
+            filename="model.pth",
+            token=hf_token,
+            local_dir=os.path.join(PROJECT_ROOT, "data", "gigatime"),
+        )
+        state = torch.load(ckpt_path, map_location=device, weights_only=False)
+        model.load_state_dict(state)
+    model.to(device)
+    model.eval()
+    _gigatime_model = model
+    _gigatime_device = device
+    return model, device
+
+
+@app.route('/api/gigatime/predict', methods=['POST'])
+def gigatime_predict():
+    """Run GigaTIME inference on an uploaded H&E tile."""
+    import torch
+    import numpy as np
+    from torchvision import transforms
+    from PIL import Image as PILImage
+
+    if 'tile' not in request.files:
+        return jsonify({"error": "No tile file provided"}), 400
+
+    file = request.files['tile']
+    try:
+        img = PILImage.open(file.stream).convert('RGB')
+    except Exception as e:
+        return jsonify({"error": f"Cannot read image: {e}"}), 400
+
+    try:
+        model, device = _load_gigatime_model()
+    except Exception as e:
+        return jsonify({"error": f"Model load failed: {e}"}), 500
+
+    transform = transforms.Compose([
+        transforms.Resize((512, 512)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ])
+    tensor = transform(img).unsqueeze(0).to(device)
+
+    with torch.no_grad():
+        output = model(tensor)
+        output = torch.sigmoid(output)
+
+    output_np = output.squeeze(0).cpu().numpy()  # (23, 512, 512)
+
+    input_resized = img.resize((512, 512))
+    buf = io.BytesIO()
+    input_resized.save(buf, format='PNG')
+    input_b64 = base64.b64encode(buf.getvalue()).decode('utf-8')
+
+    channel_images = []
+    for i, name in enumerate(GIGATIME_CHANNELS):
+        ch = output_np[i]
+        ch_uint8 = (ch * 255).clip(0, 255).astype(np.uint8)
+        ch_img = PILImage.fromarray(ch_uint8, mode='L')
+        buf = io.BytesIO()
+        ch_img.save(buf, format='PNG')
+        channel_images.append({
+            "name": name,
+            "image": base64.b64encode(buf.getvalue()).decode('utf-8'),
+        })
+
+    return jsonify({"input": input_b64, "channels": channel_images})
+
+
+@app.route('/api/gigatime/predict/stream', methods=['POST'])
+def gigatime_predict_stream():
+    """SSE-streaming GigaTIME inference with per-step progress."""
+    if 'tile' not in request.files:
+        return jsonify({"error": "No tile file provided"}), 400
+    file_bytes = request.files['tile'].read()
+
+    def generate():
+        import torch
+        import numpy as np
+        import json as _json
+        from torchvision import transforms
+        from PIL import Image as PILImage
+
+        def event(step, total, message, result=None):
+            payload = {"step": step, "total": total, "message": message}
+            if result is not None:
+                payload["result"] = result
+            return f"data: {_json.dumps(payload)}\n\n"
+
+        # Step 1: Validate image
+        yield event(1, 6, "Validating image\u2026")
+        try:
+            img = PILImage.open(io.BytesIO(file_bytes)).convert('RGB')
+        except Exception as e:
+            yield event(0, 6, f"Error: cannot read image \u2014 {e}")
+            return
+
+        # Step 2: Load model (may download on first run)
+        yield event(2, 6, "Loading model (downloading on first run)\u2026")
+        try:
+            model, device = _load_gigatime_model()
+        except Exception as e:
+            yield event(0, 6, f"Error: model load failed \u2014 {e}")
+            return
+
+        # Step 3: Preprocess
+        yield event(3, 6, "Preprocessing image\u2026")
+        transform = transforms.Compose([
+            transforms.Resize((512, 512)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])
+        tensor = transform(img).unsqueeze(0).to(device)
+
+        # Step 4: Inference
+        yield event(4, 6, "Running inference\u2026")
+        with torch.no_grad():
+            output = model(tensor)
+            output = torch.sigmoid(output)
+        output_np = output.squeeze(0).cpu().numpy()
+
+        # Step 5: Encode channels
+        yield event(5, 6, "Encoding 23 channels\u2026")
+        input_resized = img.resize((512, 512))
+        buf = io.BytesIO()
+        input_resized.save(buf, format='PNG')
+        input_b64 = base64.b64encode(buf.getvalue()).decode('utf-8')
+
+        channel_images = []
+        for i, name in enumerate(GIGATIME_CHANNELS):
+            ch = output_np[i]
+            ch_uint8 = (ch * 255).clip(0, 255).astype(np.uint8)
+            ch_img = PILImage.fromarray(ch_uint8, mode='L')
+            buf = io.BytesIO()
+            ch_img.save(buf, format='PNG')
+            channel_images.append({
+                "name": name,
+                "image": base64.b64encode(buf.getvalue()).decode('utf-8'),
+            })
+
+        # Step 6: Done — send full result
+        yield event(6, 6, "Inference complete \u2014 23 channels generated.",
+                    result={"input": input_b64, "channels": channel_images})
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype='text/event-stream',
+        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'},
+    )
+
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

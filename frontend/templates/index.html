@@ -17,6 +17,7 @@
             <button class="tab-btn active" onclick="showTab('config', this)">Configuration</button>
             <button class="tab-btn" onclick="showTab('run', this)">Run Experiments</button>
             <button class="tab-btn" onclick="showTab('results', this)">Results</button>
+            <button class="tab-btn" onclick="showTab('gigatime', this)">GigaTIME</button>
         </div>
 
         <!-- Configuration Tab -->
@@ -131,6 +132,45 @@
                         <h3>🔬 TIL Results</h3>
                         <div id="til-results" class="results-list"></div>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- GigaTIME Tab -->
+        <div id="gigatime-tab" class="tab-content">
+            <div class="card">
+                <h2>🧬 GigaTIME — H&amp;E to mIF Prediction</h2>
+                <p class="subtitle">Upload an H&amp;E tile (PNG/JPG, ideally 556&times;556 px) and generate a
+                   synthetic multiplexed immunofluorescence prediction across 23 biomarker channels.</p>
+
+                <div class="gigatime-upload-area">
+                    <div class="form-group">
+                        <label for="he-tile-input">Upload H&amp;E Tile:</label>
+                        <input type="file" id="he-tile-input" accept="image/png,image/jpeg" class="form-control">
+                    </div>
+                    <div id="he-preview-container" style="display:none;">
+                        <p><strong>Preview:</strong></p>
+                        <img id="he-preview" class="gigatime-input-preview" alt="H&E tile preview">
+                    </div>
+                    <button class="btn btn-primary btn-large" onclick="runGigaTIME()" id="gigatime-run-btn">
+                        Run GigaTIME Inference
+                    </button>
+                    <div id="gigatime-status" class="gigatime-status"></div>
+                    <div id="gigatime-progress" style="display:none;">
+                        <div class="gigatime-progress-bar">
+                            <div id="gigatime-progress-fill" class="gigatime-progress-fill"></div>
+                        </div>
+                        <div id="gigatime-step-label" class="gigatime-step-label"></div>
+                    </div>
+                </div>
+
+                <div id="gigatime-results-area" style="display:none;">
+                    <hr>
+                    <h3>Input Tile</h3>
+                    <img id="gigatime-input-result" class="gigatime-input-preview" alt="Input H&E">
+
+                    <h3>Predicted mIF Channels (23)</h3>
+                    <div id="gigatime-channel-grid" class="gigatime-channel-grid"></div>
                 </div>
             </div>
         </div>
