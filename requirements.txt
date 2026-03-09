@@ -88,6 +88,7 @@ notebook>=6.0.0
 # Linux:   sudo apt-get install openslide-tools libopenslide-dev
 # macOS:   brew install openslide
 openslide-python>=1.3.0
+openslide-bin  # Windows: bundles the OpenSlide DLLs, no manual PATH setup needed
 albumentations>=1.4.0
 albucore>=0.0.4
 easydict>=1.13

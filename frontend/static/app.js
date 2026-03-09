@@ -607,16 +607,52 @@ async function runGigaTIME() {
             progressBox.style.display = "none";
             document.getElementById("gigatime-input-result").src =
               "data:image/png;base64," + ev.result.input;
+
+            // Channel grid: probability map + binary map side by side
             const grid = document.getElementById("gigatime-channel-grid");
             grid.innerHTML = ev.result.channels
               .map(
                 (ch) => `
               <div class="gigatime-channel-card">
-                <img src="data:image/png;base64,${ch.image}" alt="${ch.name}" class="gigatime-channel-img">
                 <div class="gigatime-channel-label">${ch.name}</div>
+                <div class="gigatime-channel-pair">
+                  <div class="gigatime-channel-col">
+                    <img src="data:image/png;base64,${ch.image}" alt="${ch.name} prob" class="gigatime-channel-img">
+                    <div class="gigatime-img-sublabel">Prob map</div>
+                  </div>
+                  <div class="gigatime-channel-col">
+                    <img src="data:image/png;base64,${ch.binary}" alt="${ch.name} binary" class="gigatime-channel-img">
+                    <div class="gigatime-img-sublabel">Binary</div>
+                  </div>
+                </div>
+                <div class="gigatime-channel-stat">${ch.stats.pct_positive}% positive</div>
               </div>`,
               )
               .join("");
+
+            // Stats table
+            const tbody = document.getElementById("gigatime-stats-tbody");
+            tbody.innerHTML = ev.result.channels
+              .map((ch) => {
+                const s = ch.stats;
+                const bar = Math.round(s.pct_positive);
+                return `<tr>
+                  <td><strong>${ch.name}</strong></td>
+                  <td>${s.mean_prob}</td>
+                  <td>${s.std_prob}</td>
+                  <td>${s.min_prob}</td>
+                  <td>${s.max_prob}</td>
+                  <td>
+                    <div class="stats-bar-wrap">
+                      <div class="stats-bar-fill" style="width:${bar}%"></div>
+                      <span>${s.pct_positive}%</span>
+                    </div>
+                  </td>
+                </tr>`;
+              })
+              .join("");
+
+            _lastTileResult = ev.result;
             resultsArea.style.display = "block";
             statusEl.textContent = "Inference complete \u2014 23 channels generated.";
             statusEl.className = "gigatime-status success";
@@ -631,4 +667,232 @@ async function runGigaTIME() {
   } finally {
     runBtn.disabled = false;
   }
+}
+
+// ─── GigaTIME mode switcher ───────────────────────────────────────────────────
+
+function switchGigaTIMEMode(mode) {
+  document.getElementById("gigatime-mode-tile").style.display  = mode === "tile"  ? "" : "none";
+  document.getElementById("gigatime-mode-slide").style.display = mode === "slide" ? "" : "none";
+  document.getElementById("mode-btn-tile").classList.toggle("active",  mode === "tile");
+  document.getElementById("mode-btn-slide").classList.toggle("active", mode === "slide");
+}
+
+// ─── Whole-slide pipeline ────────────────────────────────────────────────────
+
+// Show file info when user selects a slide file
+document.addEventListener("DOMContentLoaded", () => {
+  const svsInput = document.getElementById("svs-file-input");
+  if (svsInput) {
+    svsInput.addEventListener("change", function () {
+      const file = this.files[0];
+      const infoEl = document.getElementById("svs-file-info");
+      if (!file) { infoEl.style.display = "none"; return; }
+      const mb = (file.size / (1024 * 1024)).toFixed(1);
+      infoEl.textContent = `\u2714 ${file.name}  (${mb} MB)`;
+      infoEl.style.display = "block";
+    });
+  }
+});
+
+async function processWholeSlide() {
+  const fileInput   = document.getElementById("svs-file-input");
+  const statusEl    = document.getElementById("slide-status");
+  const runBtn      = document.getElementById("slide-run-btn");
+  const progressBox = document.getElementById("slide-progress");
+  const progressFill = document.getElementById("slide-progress-fill");
+  const stepLabel   = document.getElementById("slide-step-label");
+  const resultsArea = document.getElementById("slide-results-area");
+
+  if (!fileInput.files || !fileInput.files[0]) {
+    statusEl.textContent = "Please select a whole-slide image file.";
+    statusEl.className = "gigatime-status error";
+    return;
+  }
+
+  const file = fileInput.files[0];
+  const mb = (file.size / (1024 * 1024)).toFixed(1);
+
+  runBtn.disabled = true;
+  statusEl.textContent = "";
+  statusEl.className = "gigatime-status";
+  resultsArea.style.display = "none";
+  progressBox.style.display = "block";
+  progressFill.style.width = "0%";
+  stepLabel.textContent = `Uploading ${file.name} (${mb} MB)\u2026`;
+
+  const formData = new FormData();
+  formData.append("slide", file);
+
+  try {
+    const response = await fetch("/api/gigatime/process_slide/stream", {
+      method: "POST",
+      body: formData,
+    });
+
+    const reader  = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split("\n\n");
+      buffer = parts.pop();
+
+      for (const part of parts) {
+        if (!part.startsWith("data: ")) continue;
+        const ev = JSON.parse(part.slice(6));
+
+        if (ev.phase === "error") {
+          progressBox.style.display = "none";
+          statusEl.textContent = ev.message;
+          statusEl.className = "gigatime-status error";
+          continue;
+        }
+
+        // Update progress bar
+        if (ev.tile_total && ev.tile_n !== null) {
+          const pct = Math.round((ev.tile_n / ev.tile_total) * 100);
+          progressFill.style.width = pct + "%";
+          stepLabel.textContent = ev.phase === "infer"
+            ? `Tile ${ev.tile_n}/${ev.tile_total}: ${ev.message}`
+            : ev.message;
+        } else {
+          stepLabel.textContent = ev.message;
+        }
+
+        if (ev.phase === "done" && ev.result) {
+          progressBox.style.display = "none";
+          const r = ev.result;
+
+          // Summary banner
+          document.getElementById("slide-summary").innerHTML = `
+            <div class="slide-summary-banner">
+              <strong>${r.slide_name}</strong> &mdash;
+              ${r.tiles_processed} tiles processed &nbsp;|&nbsp;
+              Tiles saved to: <code>${r.output_dir}</code>
+            </div>`;
+
+          // Stats table (already sorted by mean_prob desc from backend)
+          const tbody = document.getElementById("slide-stats-tbody");
+          tbody.innerHTML = r.channels.map((ch) => {
+            const bar = Math.min(100, Math.round(ch.pct_positive));
+            return `<tr>
+              <td><strong>${ch.name}</strong></td>
+              <td>${ch.mean_prob}</td>
+              <td>${ch.std_prob}</td>
+              <td>${ch.max_prob}</td>
+              <td>
+                <div class="stats-bar-wrap">
+                  <div class="stats-bar-fill" style="width:${bar}%"></div>
+                  <span>${ch.pct_positive}%</span>
+                </div>
+              </td>
+            </tr>`;
+          }).join("");
+
+          _lastSlideResult = ev.result;
+
+          // Spatial probability maps
+          const spatialSection = document.getElementById("slide-spatial-section");
+          const spatialGrid    = document.getElementById("slide-spatial-grid");
+          if (r.spatial_maps && r.spatial_maps.length > 0) {
+            spatialGrid.innerHTML = r.spatial_maps.map((m) => `
+              <div class="gigatime-channel-card">
+                <img src="data:image/png;base64,${m.image}" alt="${m.name}" class="gigatime-channel-img">
+                <div class="gigatime-channel-label">${m.name}</div>
+              </div>`).join("");
+            spatialSection.style.display = "block";
+          } else {
+            spatialSection.style.display = "none";
+          }
+
+          resultsArea.style.display = "block";
+          statusEl.textContent = ev.message;
+          statusEl.className = "gigatime-status success";
+        }
+      }
+    }
+  } catch (err) {
+    progressBox.style.display = "none";
+    statusEl.textContent = "Network error: " + err.message;
+    statusEl.className = "gigatime-status error";
+  } finally {
+    runBtn.disabled = false;
+  }
+}
+
+// ─── Raw Output Modal ─────────────────────────────────────────────────────────
+
+let _lastTileResult  = null;
+let _lastSlideResult = null;
+
+function _getResult(mode) {
+  return mode === "tile" ? _lastTileResult : _lastSlideResult;
+}
+
+function _channelsForExport(mode) {
+  const r = _getResult(mode);
+  if (!r) return null;
+  // For tile mode, strip the large base64 image fields before display/export
+  return r.channels.map(({ name, stats, mean_prob, std_prob, max_prob, pct_positive }) =>
+    stats
+      ? { name, ...stats }                            // tile mode has nested stats
+      : { name, mean_prob, std_prob, max_prob, pct_positive }  // slide mode is flat
+  );
+}
+
+function showRawOutput(mode) {
+  const channels = _channelsForExport(mode);
+  if (!channels) {
+    alert("No results yet. Run inference first.");
+    return;
+  }
+  const r = _getResult(mode);
+  const payload = {
+    mode,
+    ...(r.slide_name  ? { slide_name: r.slide_name, tiles_processed: r.tiles_processed } : {}),
+    channels,
+  };
+  document.getElementById("raw-modal-title").textContent =
+    mode === "tile" ? "Raw Output — Single Tile" : `Raw Output — ${r.slide_name || "Whole Slide"}`;
+  document.getElementById("raw-modal-content").textContent =
+    JSON.stringify(payload, null, 2);
+  document.getElementById("raw-output-modal").style.display = "flex";
+}
+
+function closeRawModal(e) {
+  if (e.target === document.getElementById("raw-output-modal"))
+    document.getElementById("raw-output-modal").style.display = "none";
+}
+
+function downloadRawCSV(mode) {
+  const channels = _channelsForExport(mode);
+  if (!channels) { alert("No results yet."); return; }
+  const headers = Object.keys(channels[0]);
+  const rows = channels.map(ch => headers.map(h => ch[h] ?? "").join(","));
+  const csv = [headers.join(","), ...rows].join("\n");
+  _downloadBlob(csv, `gigatime_${mode}_output.csv`, "text/csv");
+}
+
+function downloadRawJSON(mode) {
+  const r = _getResult(mode);
+  if (!r) { alert("No results yet."); return; }
+  const channels = _channelsForExport(mode);
+  const payload = {
+    mode,
+    ...(r.slide_name ? { slide_name: r.slide_name, tiles_processed: r.tiles_processed } : {}),
+    channels,
+  };
+  _downloadBlob(JSON.stringify(payload, null, 2), `gigatime_${mode}_output.json`, "application/json");
+}
+
+function _downloadBlob(content, filename, mime) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([content], { type: mime }));
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
