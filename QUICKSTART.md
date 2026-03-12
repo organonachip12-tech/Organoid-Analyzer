@@ -103,6 +103,20 @@ python main_test.py
 python generateImage.py
 ```
 
+#### GigaTIME:
+```bash
+# Option 1: Web UI (easiest)
+python run_frontend.py
+# Open http://localhost:5000 → GigaTIME tab → upload tile or slide
+
+# Option 2: CLI inference
+python -m gigatime_analyzer.training.main --mode infer \
+  --tiling_dir ./data/gigatime/preprocessed_tiles \
+  --metadata ./data/gigatime/preprocessed_tiles/preprocessed_metadata.csv
+```
+
+The pretrained model downloads automatically from HuggingFace on first run. Place `model.pth` in `data/gigatime/` to skip download, or set `HF_TOKEN` for gated repos.
+
 ## 🔧 Troubleshooting
 
 ### Common Issues:
@@ -123,6 +137,10 @@ python generateImage.py
    - Verify Excel sheet names match Config.py
    - Check CSV column headers
 
+5. **GigaTIME model download fails:**
+   - Set `HF_TOKEN` environment variable if the HuggingFace repo is gated
+   - Or manually download `model.pth` and place in `data/gigatime/`
+
 ### Performance Tips:
 
 - **GPU**: Both projects benefit significantly from GPU acceleration
@@ -141,6 +159,10 @@ python generateImage.py
 - `results/`: Model performance metrics
 - `survival_curve.png`: Survival probability plots
 - `UMAP/`: Dimensionality reduction visualizations
+
+### GigaTIME:
+- Web UI: Channel maps, stats table, CSV/JSON export
+- CLI: `results/gigatime/` with metrics and checkpoints
 
 ## 🆘 Need Help?
 
