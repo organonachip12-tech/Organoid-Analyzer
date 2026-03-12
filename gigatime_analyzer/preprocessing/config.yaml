@@ -1,0 +1,13 @@
+# Preprocessing config: SVS -> GigaTIME-compatible tiles
+# Output layout matches sample_test_data for direct use with generate_tile_pair_df and HECOMETDataset_roi.
+
+tile_size: 556
+magnification: 20
+stride: 556
+tissue_threshold: 0.8   # reject tiles with >80% background (keep if >=20% tissue)
+min_variance: 200       # reject tiles with variance below this (HE)
+normalize_stain: false
+output_format: png
+
+# GigaTIME dummy metadata (23 channels per common_channel_list in prov_data)
+num_comet_channels: 23
