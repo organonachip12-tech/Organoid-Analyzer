@@ -112,6 +112,7 @@ def denormalize(tensor, mean, std):
 
 def train(config, train_loader, model, criterion, optimizer):
     """Run one training epoch. Returns OrderedDict with loss and per-class pearson metrics."""
+    device = config.get('device', torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
     avg_meters = {'loss': AverageMeter(), 'pearson': AverageMeter()}
     pearson_per_class_meters = [AverageMeter() for _ in range(config['num_classes'])]
 
@@ -121,9 +122,9 @@ def train(config, train_loader, model, criterion, optimizer):
     for input, target, name in train_loader:
         downsampled_image = F.interpolate(target, scale_factor=1/8, mode='bilinear', align_corners=False)
         target = F.interpolate(downsampled_image, size=(config["input_h"], config["input_h"]), mode='bilinear', align_corners=False)
-        target = target.cuda()
+        target = target.to(device)
 
-        output_image = model(input.cuda()).cuda()
+        output_image = model(input.to(device)).to(device)
         loss = criterion(output_image, target)
 
         optimizer.zero_grad()
@@ -152,6 +153,7 @@ def validate(config, val_loader, model, criterion, return_samples=False):
     If return_samples=True, also returns one batch of (input, target, output) tensors
     for visualization under keys 'input', 'target', 'output'.
     """
+    device = config.get('device', torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
     avg_meters = {'loss': AverageMeter(), 'pearson': AverageMeter()}
     pearson_per_class_meters = [AverageMeter() for _ in range(config['num_classes'])]
 
@@ -166,9 +168,9 @@ def validate(config, val_loader, model, criterion, return_samples=False):
         for input, target, name in val_loader:
             downsampled_image = F.interpolate(target, scale_factor=1/8, mode='bilinear', align_corners=False)
             target = F.interpolate(downsampled_image, size=(config["input_h"], config["input_h"]), mode='bilinear', align_corners=False)
-            target = target.cuda()
+            target = target.to(device)
 
-            output_image = model(input.cuda()).cuda()
+            output_image = model(input.to(device)).to(device)
             loss = criterion(output_image, target)
 
             _, pearson, _ = get_box_metrics(output_image, target, box_size=8)

@@ -304,6 +304,19 @@ Key settings to modify in `main_test.py`:
    - Verify Excel file sheet names match Config.py
    - Check CSV column headers match expected format
 
+### GigaTIME-Specific:
+
+5. **NumPy / OpenCV compatibility:**
+   - The project pins `numpy==1.26.4` and `opencv-python==4.8.1.78` for GigaTIME stability with PyTorch and Albumentations.
+   - If you see dependency conflicts, create a fresh venv and install from `requirements.txt`.
+
+6. **CPU-only execution:**
+   - GigaTIME runs on CPU when CUDA is unavailable (device-agnostic `.to(device)`).
+   - Inference is slower on CPU; use GPU when possible.
+
+7. **HuggingFace model download fails:**
+   - Set `HF_TOKEN` if the repo is gated, or place `model.pth` in `data/gigatime/` manually.
+
 ### Performance Tips:
 
 1. **GPU Usage:**

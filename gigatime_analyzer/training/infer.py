@@ -139,10 +139,12 @@ def convert_to_csv(pearson_dict, out_path, channel_list):
     print(f"Results written to: {out_path}")
 
 
-def small_tile_preds(big_image, output_image, model, window_size=256):
+def small_tile_preds(big_image, output_image, model, window_size=256, device=None):
+    if device is None:
+        device = next(model.parameters()).device
     for i in range(0, big_image.shape[2], window_size):
         for j in range(0, big_image.shape[3], window_size):
-            window = big_image[:, :, i:i + window_size, j:j + window_size].cuda()
+            window = big_image[:, :, i:i + window_size, j:j + window_size].to(device)
             output = model(window)
             output_image[:, :, i:i + window_size, j:j + window_size] = output
     return output_image
@@ -154,6 +156,7 @@ def validate(config, val_loader, model, criterion, output_dir, set_name="silver"
     Writes per-channel Pearson CSV to output_dir/metrics/<set>_Results_per_channel_<date>_test_results.csv.
     Returns OrderedDict with loss and per-channel pearson metrics.
     """
+    device = config.get('device', torch.device('cuda' if torch.cuda.is_available() else 'cpu'))
     avg_meters = {'loss': AverageMeter(), 'pearson': AverageMeter()}
     pearson_per_class_meters = [AverageMeter() for _ in range(config['num_classes'])]
 
@@ -170,10 +173,10 @@ def validate(config, val_loader, model, criterion, output_dir, set_name="silver"
 
             downsampled_image = F.interpolate(target_g, scale_factor=1/8, mode='bilinear', align_corners=False)
             target = F.interpolate(downsampled_image, size=(512, 512), mode='bilinear', align_corners=False)
-            target = target.cuda()
+            target = target.to(device)
 
-            output_image = torch.zeros_like(target).cuda()
-            output_image = small_tile_preds(input, output_image, model, window_size)
+            output_image = torch.zeros_like(target).to(device)
+            output_image = small_tile_preds(input, output_image, model, window_size, device=device)
 
             output_image = output_image > 0.5
             output_image = output_image.float()

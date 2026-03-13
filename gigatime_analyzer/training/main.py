@@ -126,6 +126,9 @@ def _run_train(args, output_dir):
 
     config = vars(args)
     config['output_dir'] = output_dir
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    config['device'] = device
+    print(f"=> using device: {device}")
 
     os.makedirs(output_dir, exist_ok=True)
     with open(os.path.join(output_dir, "config.yml"), "w") as f:
@@ -138,20 +141,21 @@ def _run_train(args, output_dir):
 
     # Loss
     if config['loss'] == 'MSELoss':
-        criterion = nn.MSELoss().cuda()
+        criterion = nn.MSELoss().to(device)
     elif config['loss'] == 'BCEWithLogitsLoss':
-        criterion = nn.BCEWithLogitsLoss().cuda()
+        criterion = nn.BCEWithLogitsLoss().to(device)
     elif config['loss'] == 'BCEDiceLoss':
-        criterion = BCEDiceLoss().cuda()
+        criterion = BCEDiceLoss().to(device)
     else:
         raise ValueError(f"Unknown loss: {config['loss']}")
 
-    cudnn.benchmark = False
+    if device.type == 'cuda':
+        cudnn.benchmark = False
 
     print(f"=> creating model {config['arch']}")
-    model = gigatime(num_classes=config['num_classes'], input_channels=config['input_channels']).cuda()
+    model = gigatime(num_classes=config['num_classes'], input_channels=config['input_channels']).to(device)
 
-    if len(config["gpu_ids"]) > 1:
+    if device.type == 'cuda' and len(config["gpu_ids"]) > 1:
         model = nn.DataParallel(model, device_ids=config["gpu_ids"])
         print(f"Using multiple GPUs: {config['gpu_ids']}")
 
@@ -251,8 +255,8 @@ def _run_train(args, output_dir):
 
     log = OrderedDict([('epoch', []), ('lr', []), ('loss', []), ('pearson', []), ('val_loss', []), ('val_pearson', [])])
 
-    mean = torch.tensor([0.485, 0.456, 0.406]).cuda()
-    std = torch.tensor([0.229, 0.224, 0.225]).cuda()
+    mean = torch.tensor([0.485, 0.456, 0.406]).to(device)
+    std = torch.tensor([0.229, 0.224, 0.225]).to(device)
 
     best_pearson = 0
     trigger = 0
@@ -265,7 +269,7 @@ def _run_train(args, output_dir):
         val_log = validate(config, val_loader, model, criterion, return_samples=return_samples)
 
         if return_samples and val_log.get('input') is not None:
-            viz_input = denormalize(val_log['input'].cuda(), mean, std)
+            viz_input = denormalize(val_log['input'].to(device), mean, std)
             save_image(torchvision.utils.make_grid(viz_input, nrow=1),
                        os.path.join(output_dir, 'HE_image.png'))
             save_image(torchvision.utils.make_grid(val_log['target'][:, 0, :, :].unsqueeze(1), nrow=1),
@@ -291,7 +295,8 @@ def _run_train(args, output_dir):
             print("=> early stopping")
             break
 
-        torch.cuda.empty_cache()
+        if device.type == 'cuda':
+            torch.cuda.empty_cache()
 
     print(f"Training complete. Best val pearson: {best_pearson:.4f}")
 
@@ -315,6 +320,9 @@ def _run_infer(args, output_dir):
 
     config = vars(args)
     config['output_dir'] = output_dir
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    config['device'] = device
+    print(f"=> using device: {device}")
 
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(os.path.join(output_dir, "metrics"), exist_ok=True)
@@ -326,18 +334,20 @@ def _run_infer(args, output_dir):
 
     # Loss
     if config['loss'] == 'MSELoss':
-        criterion = nn.MSELoss().cuda()
+        criterion = nn.MSELoss().to(device)
     elif config['loss'] == 'BCEWithLogitsLoss':
-        criterion = nn.BCEWithLogitsLoss().cuda()
+        criterion = nn.BCEWithLogitsLoss().to(device)
     else:
-        criterion = BCEDiceLoss().cuda()
+        criterion = BCEDiceLoss().to(device)
 
-    cudnn.benchmark = False
+    if device.type == 'cuda':
+        cudnn.benchmark = False
 
     print(f"=> creating model {config['arch']}")
-    model = gigatime(num_classes=config['num_classes'], input_channels=config['input_channels']).cuda()
+    model = gigatime(num_classes=config['num_classes'], input_channels=config['input_channels']).to(device)
     model = load_pretrained_model(model, output_dir, hf_token=config.get('hf_token'))
-    model = nn.DataParallel(model)
+    if device.type == 'cuda' and len(config.get("gpu_ids", [0])) > 1:
+        model = nn.DataParallel(model, device_ids=config["gpu_ids"])
 
     val_transform = Compose([
         geometric.Resize(config['input_h'], config['input_w']),
@@ -398,7 +408,8 @@ def _run_infer(args, output_dir):
 
     from gigatime_analyzer.training.infer import print_logs
     print_logs(test_log)
-    torch.cuda.empty_cache()
+    if device.type == 'cuda':
+        torch.cuda.empty_cache()
 
 
 def main():
