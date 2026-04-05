@@ -1,0 +1,758 @@
+"""
+GDC TCGA helper module - Reusable module for querying GDC and building TCGA datasets
+
+Purpose
+1. Query /cases for a TCGA project and pull survival and demographic fields
+2. Query /files for the same project and pull slide file metadata that can be linked back to cases
+3. Apply cohort filtering rules such as valid survival data and optional Primary Tumor filtering
+4. Build spec compliant annotations and clinical CSV outputs
+
+reusable Python wrapper around the GDC REST API plus dataset building utilities.
+"""
+
+import requests
+import csv
+
+#turn on/off Debug global - set True/False
+DEBUG = False
+
+# Base URL for all GDC API endpoints
+BASE = "https://api.gdc.cancer.gov"
+
+
+def gdc_post(endpoint: str, payload: dict, token: str | None = None) -> dict:
+    """
+    Send a POST request to a GDC search and retrieval endpoint.
+
+    Why POST
+    GET queries can become too long once filters and fields are included.
+    POST lets you send the same query as JSON safely and cleanly.
+
+    Args
+    endpoint: "cases" or "files" or another search endpoint
+    payload: JSON body containing keys like filters, fields, expand, format, size, from
+    token: optional GDC auth token, only required for controlled access data
+
+    Returns
+    Parsed JSON as a Python dict.
+
+    Notes about response shape
+    For search endpoints like /cases and /files the actual records are typically in:
+    response["data"]["hits"]
+    and pagination metadata is in:
+    response["data"]["pagination"]
+    """
+    # Build full URL like https://api.gdc.cancer.gov/cases
+    url = f"{BASE}/{endpoint.lstrip('/')}"
+
+    # Tell the server we are sending JSON in the request body
+    headers = {"Content-Type": "application/json"}
+
+    # Attach auth header if a token is provided
+    if token:
+        headers["X-Auth-Token"] = token
+
+    # Send request and limit how long we wait
+    r = requests.post(url, json=payload, headers=headers, timeout=60)
+
+    # Raise an exception for HTTP errors like 400 or 403
+    r.raise_for_status()
+
+    # Parse JSON response body into a Python dictionary
+    return r.json()
+
+
+def build_filter(field: str, values, op: str = "in") -> dict:
+    """
+    Build one GDC filter clause.
+
+    Args
+    field: a valid field path for the endpoint, for example:
+      "project.project_id" when querying /cases
+      "cases.project.project_id" when querying /files
+    values: a single value or list of values to match
+    op: GDC operator, most commonly "in" or "="
+
+    Returns
+    A dict in the GDC filter format:
+    {"op": op, "content": {"field": field, "value": [values...]}}
+    """
+    # GDC expects a list under "value", even if you only match one thing
+    if not isinstance(values, list):
+        values = [values]
+
+    return {"op": op, "content": {"field": field, "value": values}}
+
+
+def and_filter(*filters: dict) -> dict:
+    """
+    Combine multiple filter clauses with logical AND.
+
+    Example
+    and_filter(
+      build_filter("cases.project.project_id", "TCGA-BRCA", op="="),
+      build_filter("data_format", "SVS", op="=")
+    )
+    """
+    return {"op": "and", "content": list(filters)}
+
+
+def get_cases_survival(project_id: str, size: int = 1000, offset: int = 0, token: str | None = None) -> dict:
+    """
+    Query /cases for a project and return survival relevant fields.
+
+    Args
+    project_id: TCGA project id like "TCGA-BRCA"
+    size: number of records to request per call
+    offset: pagination offset, passed as "from"
+    token: optional auth token
+
+    Returns
+    JSON response dict from /cases.
+    Records are usually in response["data"]["hits"].
+
+    Notes
+    Survival fields can appear in different nodes across releases and projects.
+    This starter pulls common ones from demographic and diagnoses.
+    """
+    # Keep the response small by requesting only fields we care about
+    fields = [
+        "submitter_id",
+        "case_id",
+        "demographic.vital_status",
+        "demographic.days_to_death",
+        "demographic.gender",
+        "demographic.days_to_birth",
+        "diagnoses.days_to_last_follow_up",
+        "diagnoses.days_to_death",
+    ]
+
+    payload = {
+        # Restrict to one project at the case level
+        "filters": and_filter(build_filter("project.project_id", project_id, op="=")),
+        # API expects a comma separated string for fields
+        "fields": ",".join(fields),
+        # Include nested objects in the response
+        "expand": "diagnoses,demographic",
+        "format": "JSON",
+        # Pagination controls
+        "size": str(size),
+        "from": str(offset),
+    }
+
+    return gdc_post("cases", payload, token=token)
+
+
+def get_files_for_project(project_id: str, size: int = 1000, offset: int = 0, token: str | None = None) -> dict:
+    """
+    Query /files for a project and return file metadata that can be linked to cases.
+
+    This returns all files for the project unless you add additional filters.
+
+    Args
+    project_id: TCGA project id like "TCGA-BRCA"
+    size: number of records to request per call
+    offset: pagination offset, passed as "from"
+    token: optional auth token
+
+    Returns
+    JSON response dict from /files.
+    Records are usually in response["data"]["hits"].
+    """
+    fields = [
+        "file_id",
+        "file_name",
+        "data_category",
+        "data_type",
+        "experimental_strategy",
+        "data_format",
+        "access",
+        # These let you join file records back to the patient
+        "cases.submitter_id",
+        "cases.case_id",
+    ]
+
+    payload = {
+        # When querying /files you filter project through the linked cases object
+        "filters": and_filter(build_filter("cases.project.project_id", project_id, op="=")),
+        "fields": ",".join(fields),
+        "format": "JSON",
+        "size": str(size),
+        "from": str(offset),
+    }
+
+    return gdc_post("files", payload, token=token)
+
+
+def get_slide_files(project_id: str, size: int = 1000, offset: int = 0, token: str | None = None) -> dict:
+    """
+    Convenience wrapper to retrieve slide like files.
+
+    Important
+    The exact labeling can vary by project.
+    Start by calling get_files_for_project once and inspect returned data_type and data_format.
+    Then tighten the slide filter based on what you see.
+
+    Current default behavior
+    This uses a conservative slide oriented filter:
+    data_format == "SVS"
+    If your project uses a different format, adjust the filter below.
+    """
+    fields = [
+        "file_id",
+        "file_name",
+        "data_category",
+        "data_type",
+        "experimental_strategy",
+        "data_format",
+        "access",
+        "cases.submitter_id",
+        "cases.case_id",
+        # bring sample metadata so we can enforce Primary Tumor logic
+        "cases.samples.sample_type",
+        "cases.samples.submitter_id",
+    ]
+
+    slide_filter = and_filter(
+        build_filter("cases.project.project_id", project_id, op="="),
+        build_filter("data_format", "SVS", op="="),
+    )
+
+    payload = {
+        "filters": slide_filter,
+        "fields": ",".join(fields),
+        "format": "JSON",
+        "size": str(size),
+        "from": str(offset),
+    }
+
+    return gdc_post("files", payload, token=token)
+
+
+def join_key_note() -> str:
+    """
+    Join guidance for you or teammates.
+
+    To link slides back to survival:
+    cases_resp["data"]["hits"] has submitter_id and case_id
+    files_resp["data"]["hits"] has cases as a list, each with submitter_id and case_id
+
+    The most stable join key for humans is usually:
+    submitter_id
+    """
+    return "Join cases and files on submitter_id when available; file hits include cases as a list."
+
+def get_days_to_last_follow_up(case_hit: dict):
+    """
+    Return the first non-empty days_to_last_follow_up found in diagnoses.
+    If nothing usable is found, return None.
+    """
+    diagnoses = case_hit.get("diagnoses", [])
+
+    for dx in diagnoses:
+        value = dx.get("days_to_last_follow_up")
+        if value not in [None, "", "--"]:
+            return value
+
+    return None
+
+def get_days_to_death(case_hit: dict):
+    """
+    Return days_to_death from demographic if present,
+    otherwise the first non-empty days_to_death in diagnoses.
+    """
+    demographic = case_hit.get("demographic", {}) or {}
+    value = demographic.get("days_to_death")
+
+    if value not in [None, "", "--"]:
+        return value
+
+    diagnoses = case_hit.get("diagnoses", [])
+    for dx in diagnoses:
+        value = dx.get("days_to_death")
+        if value not in [None, "", "--"]:
+            return value
+
+    return None
+
+def is_primary_tumor_file(file_hit: dict) -> bool:
+    """
+    Return True if any linked sample for this file is Primary Tumor.
+
+    Why:
+    Section 4 recommends using Primary Tumor (01) samples when possible.
+    """
+    linked_cases = file_hit.get("cases", [])
+
+    for case in linked_cases:
+        samples = case.get("samples", [])
+        for sample in samples:
+            if sample.get("sample_type") == "Primary Tumor":
+                return True
+
+    return False
+
+def extract_case_survival(case_hit: dict) -> dict:
+    """
+    Pull survival and demographic values from one case record.
+
+    Returns a dict with:
+    - submitter_id
+    - case_id
+    - vital_status
+    - days_to_death
+    - days_to_last_follow_up
+    - gender
+    - days_to_birth
+    """
+    demographic = case_hit.get("demographic", {}) or {}
+
+    return {
+        "submitter_id": case_hit.get("submitter_id"),
+        "case_id": case_hit.get("case_id") or case_hit.get("submitter_id"),
+        "vital_status": demographic.get("vital_status"),
+        "days_to_death": get_days_to_death(case_hit),
+        "days_to_last_follow_up": get_days_to_last_follow_up(case_hit),
+        "gender": demographic.get("gender"),
+        "days_to_birth": demographic.get("days_to_birth"),
+    }
+
+def build_case_map(cases_resp: dict) -> dict:
+    """
+    Build a lookup dictionary keyed by submitter_id.
+
+    Example:
+    case_map["TCGA-BH-A18H"] -> survival info for that case
+    """
+    case_map = {}
+    cases_hits = cases_resp.get("data", {}).get("hits", [])
+
+    for case_hit in cases_hits:
+        case_info = extract_case_survival(case_hit)
+        submitter_id = case_info.get("submitter_id")
+
+        if DEBUG:
+            print(f"[DEBUG] submitter_id: {submitter_id}")
+
+        if submitter_id:
+            case_map[submitter_id] = case_info
+
+    return case_map
+
+def clean_survival_value(value):
+    """
+    Normalize raw survival values coming from the GDC API.
+
+    GDC fields like days_to_death or days_to_last_follow_up can be:
+    - None
+    - empty string ""
+    - placeholder "--"
+    - numeric (int or float)
+    - sometimes string representations of numbers
+
+    What this function does:
+    - Filters out invalid placeholders → returns None
+    - Converts valid values → float
+
+    Why float:
+    Keeps everything consistent for downstream analysis and CSV output.
+
+    Example:
+    "456" → 456.0
+    "--" → None
+    None → None
+    """
+    if value in [None, "", "--"]:
+        return None
+
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        # If conversion fails, treat as missing
+        return None
+
+def get_age_at_index(days_to_birth):
+    """
+    Convert GDC days_to_birth into age at index in years.
+
+    GDC commonly stores days_to_birth as a negative number.
+    """
+    value = clean_survival_value(days_to_birth)
+
+    if value is None:
+        return None
+
+    return int(abs(value) / 365.25)
+
+def is_valid_survival_case(case_info: dict, min_follow_up_days: float | None = None) -> bool:
+    """
+    Check whether a case satisfies the survival rules from section 4.
+
+    Rules:
+    - vital_status must be Alive or Dead
+    - Dead requires days_to_death
+    - Alive requires days_to_last_follow_up
+    - optionally exclude very short follow-up
+    """
+    vital_status = case_info.get("vital_status")
+    days_to_death = clean_survival_value(case_info.get("days_to_death"))
+    days_to_last_follow_up = clean_survival_value(case_info.get("days_to_last_follow_up"))
+
+    if vital_status not in ["Alive", "Dead"]:
+        return False
+
+    if vital_status == "Dead" and days_to_death is None:
+        return False
+
+    if vital_status == "Alive" and days_to_last_follow_up is None:
+        return False
+
+    # optional short follow-up exclusion
+    if min_follow_up_days is not None:
+        if vital_status == "Dead" and days_to_death is not None and days_to_death < min_follow_up_days:
+            return False
+        if vital_status == "Alive" and days_to_last_follow_up is not None and days_to_last_follow_up < min_follow_up_days:
+            return False
+
+    return True
+
+def compute_survival_fields(case_info: dict):
+    """
+    Convert raw case survival data into final model-ready fields.
+
+    Input:
+    case_info = {
+        "vital_status": "Alive" or "Dead",
+        "days_to_death": value,
+        "days_to_last_follow_up": value
+    }
+
+    Output:
+    (survival_time, death_occurred)
+
+    Where:
+    - survival_time = numeric value in days
+    - death_occurred = 1 if Dead, 0 if Alive
+
+    Logic (based on survival analysis conventions):
+    - If patient is Dead:
+        → event occurred → use days_to_death
+    - If patient is Alive:
+        → censored → use days_to_last_follow_up
+
+    This matches Kaplan–Meier / survival modeling expectations.
+    """
+
+    # Extract raw values from case_info
+    vital_status = case_info.get("vital_status")
+
+    # Clean and normalize survival fields
+    days_to_death = clean_survival_value(case_info.get("days_to_death"))
+    days_to_last_follow_up = clean_survival_value(case_info.get("days_to_last_follow_up"))
+
+    # Case 1: patient died → event observed
+    if vital_status == "Dead" and days_to_death is not None:
+        return days_to_death, 1
+
+    # Case 2: patient alive → censored observation
+    if vital_status == "Alive" and days_to_last_follow_up is not None:
+        return days_to_last_follow_up, 0
+
+    # Any unexpected value → drop later
+    return None, None
+
+def build_annotations(
+    cases_resp: dict,
+    files_resp: dict,
+    images_dir: str = "./images",
+    primary_tumor_only: bool = True,
+    min_follow_up_days: float | None = None,
+) -> list[dict]:
+    """
+    Join case survival data with slide files and build annotation rows.
+
+    Output columns:
+    - image_path
+    - survival_time
+    - death_occurred
+    """
+    rows = []
+    case_map = build_case_map(cases_resp)
+    files_hits = files_resp.get("data", {}).get("hits", [])
+
+    for file_hit in files_hits:
+        file_name = file_hit.get("file_name")
+        linked_cases = file_hit.get("cases", [])
+
+        if not file_name or not linked_cases:
+            continue
+
+        # section 4: keep Primary Tumor files only if requested
+        if primary_tumor_only and not is_primary_tumor_file(file_hit):
+            if DEBUG:
+                print(f"[FILTER] Skipping non-primary tumor file: {file_name}")
+            continue
+        
+        # handle multiple linked cases
+        submitter_id = None
+        for c in linked_cases:
+            sid = c.get("submitter_id")
+            if sid:
+                submitter_id = sid
+                break
+
+        # DEBUG: show what file we are processing
+        if DEBUG:
+            print(f"[JOIN] file={file_name} case={submitter_id}")
+
+        case_info = case_map.get(submitter_id)
+        if not case_info:
+            if DEBUG:
+                print(f"[DEBUG] No matching case for {submitter_id}")
+            continue
+
+        # section 4: enforce survival eligibility rules
+        if not is_valid_survival_case(case_info, min_follow_up_days=min_follow_up_days):
+            if DEBUG:
+                print(f"[FILTER] Invalid survival case for {submitter_id}")
+            continue
+
+        survival_time, death_occurred = compute_survival_fields(case_info)
+
+        if DEBUG:
+            print(f"[SURVIVAL] time={survival_time}, event={death_occurred}")
+
+        # Exclude unusable rows
+        if survival_time in [None, "", "--"]:
+            continue
+
+        if death_occurred not in [0, 1]:
+            continue
+
+        row = {
+            "image_path": f"{images_dir}/{file_name}",
+            "survival_time": survival_time,
+            "death_occurred": death_occurred,
+        }
+
+        rows.append(row)
+
+    return rows
+
+def build_clinical_rows(
+    cases_resp: dict,
+    files_resp: dict,
+    project_id: str,
+    primary_tumor_only: bool = True,
+    min_follow_up_days: float | None = None,
+) -> list[dict]:
+    """
+    Build the extended clinical CSV rows.
+
+    Output columns:
+    - case_id
+    - file_name
+    - file_id
+    - project_id
+    - survival_time
+    - vital_status
+    - days_to_death
+    - days_to_last_follow_up
+    - gender
+    - age_at_index
+    """
+    rows = []
+    case_map = build_case_map(cases_resp)
+    files_hits = files_resp.get("data", {}).get("hits", [])
+
+    for file_hit in files_hits:
+        file_name = file_hit.get("file_name")
+        file_id = file_hit.get("file_id")
+        linked_cases = file_hit.get("cases", [])
+
+        if not file_name or not linked_cases:
+            continue
+
+        # keep Primary Tumor files only if requested
+        if primary_tumor_only and not is_primary_tumor_file(file_hit):
+            continue
+
+        # choose first usable linked case
+        submitter_id = None
+        for c in linked_cases:
+            sid = c.get("submitter_id")
+            if sid:
+                submitter_id = sid
+                break
+
+        if not submitter_id:
+            continue
+
+        case_info = case_map.get(submitter_id)
+        if not case_info:
+            continue
+
+        # enforce section 4 survival rules
+        if not is_valid_survival_case(case_info, min_follow_up_days=min_follow_up_days):
+            continue
+
+        survival_time, _ = compute_survival_fields(case_info)
+
+        if survival_time is None:
+            continue
+
+        days_to_death = clean_survival_value(case_info.get("days_to_death"))
+        days_to_last_follow_up = clean_survival_value(case_info.get("days_to_last_follow_up"))
+
+        survival_time_alt = days_to_last_follow_up
+        if survival_time_alt is None:
+            survival_time_alt = days_to_death
+
+        row = {
+            "case_id": submitter_id, # if want UUID use: case_info.get("case_id") or submitter_id,
+            "file_name": file_name,
+            "file_id": file_id,
+            "project_id": project_id,
+            "survival_time": int(survival_time),
+            "vital_status": case_info.get("vital_status"),
+            "survival_time_alt": int(survival_time_alt) if survival_time_alt is not None else None,
+            "days_to_death": days_to_death,
+            "days_to_last_follow_up": days_to_last_follow_up,
+            "gender": case_info.get("gender"),
+            "age_at_index": get_age_at_index(case_info.get("days_to_birth")),
+        }
+
+        rows.append(row)
+
+    return rows
+
+def write_annotations_csv(rows: list[dict], out_csv: str):
+    """
+    Write annotation rows to CSV.
+    """
+    if not rows:
+        print("No annotation rows to write.")
+        return
+
+    fieldnames = ["image_path", "survival_time", "death_occurred"]
+
+    with open(out_csv, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+def write_clinical_csv(rows: list[dict], out_csv: str):
+    """
+    Write extended clinical rows to CSV.
+    """
+    if not rows:
+        print("No clinical rows to write.")
+        return
+
+    fieldnames = [
+        "case_id",
+        "file_name",
+        "file_id",
+        "project_id",
+        "survival_time",
+        "vital_status",
+        "survival_time_alt",
+        "days_to_death",
+        "days_to_last_follow_up",
+        "gender",
+        "age_at_index",
+    ]
+
+    with open(out_csv, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+def fetch_all_cases(project_id: str, token: str | None = None):
+    # list to store all case records across pages
+    all_hits = []
+
+    # starting position (first page)
+    offset = 0
+
+    # number of records to fetch per request
+    size = 200
+
+    # loop through all pages
+    while True:
+        # request one "page" of cases
+        resp = get_cases_survival(project_id, size=size, offset=offset, token=token)
+
+        # extract records from response
+        hits = resp.get("data", {}).get("hits", [])
+
+        # stop if no more data
+        if not hits:
+            break
+
+        # add current page of results to full list
+        all_hits.extend(hits)
+
+        # optional debug: track progress
+        if DEBUG:
+            print(f"[PAGINATION][CASES] fetched {len(all_hits)}")
+
+        # move to next page
+        offset += size
+
+        # if last page (fewer results than requested), stop
+        if len(hits) < size:
+            break
+
+    # return in same structure as original API response
+    return {"data": {"hits": all_hits}}
+
+def fetch_all_files(project_id: str, token: str | None = None):
+    # collect all file records across pages
+    all_hits = []
+
+    # starting position (first page)
+    offset = 0
+
+    # number of records per API request (page size)
+    size = 200
+
+    while True:
+        # fetch one page of slide files
+        resp = get_slide_files(project_id, size=size, offset=offset, token=token)
+
+        # extract records from response
+        hits = resp.get("data", {}).get("hits", [])
+
+        # stop when no more data is returned
+        if not hits:
+            break
+
+        # accumulate results across pages
+        all_hits.extend(hits)
+
+        # debug progress so you can see pagination working
+        if DEBUG:
+            print(f"[PAGINATION][FILES] fetched {len(all_hits)}")
+
+        # move to next page
+        offset += size
+
+        # last page check (fewer results than requested)
+        if len(hits) < size:
+            break
+
+    # return in same structure as original API response
+    return {"data": {"hits": all_hits}}
+
+# Save annotation rows to project-specific CSV file with Willems naming convention
+def write_project_annotations_csv(project_id: str, rows: list[dict]):
+    out_csv = f"annotations_gdc_{project_id}.csv"
+    write_annotations_csv(rows, out_csv)
+    return out_csv
+
+# Save clinical rows to project-specific CSV file with Willems naming convention
+def write_project_clinical_csv(project_id: str, rows: list[dict]):
+    out_csv = f"clinical_gdc_{project_id}.csv"
+    write_clinical_csv(rows, out_csv)
+    return out_csv
