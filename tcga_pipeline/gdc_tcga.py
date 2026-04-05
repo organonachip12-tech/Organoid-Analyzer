@@ -10,8 +10,17 @@ Purpose
 reusable Python wrapper around the GDC REST API plus dataset building utilities.
 """
 
-import requests
 import csv
+import sys
+from pathlib import Path
+
+import requests
+
+_repo_root = Path(__file__).resolve().parent.parent
+if str(_repo_root) not in sys.path:
+    sys.path.insert(0, str(_repo_root))
+
+from gigatime_analyzer.survival.tcga_ids import tcga_barcode_from_slide_name
 
 #turn on/off Debug global - set True/False
 DEBUG = False
@@ -310,6 +319,7 @@ def extract_case_survival(case_hit: dict) -> dict:
     return {
         "submitter_id": case_hit.get("submitter_id"),
         "case_id": case_hit.get("case_id") or case_hit.get("submitter_id"),
+        "gdc_case_uuid": case_hit.get("case_id"),
         "vital_status": demographic.get("vital_status"),
         "days_to_death": get_days_to_death(case_hit),
         "days_to_last_follow_up": get_days_to_last_follow_up(case_hit),
@@ -529,8 +539,10 @@ def build_annotations(
         if death_occurred not in [0, 1]:
             continue
 
+        patient_id = tcga_barcode_from_slide_name(file_name)
         row = {
             "image_path": f"{images_dir}/{file_name}",
+            "patient_id": patient_id,
             "survival_time": survival_time,
             "death_occurred": death_occurred,
         }
@@ -608,8 +620,15 @@ def build_clinical_rows(
         if survival_time_alt is None:
             survival_time_alt = days_to_death
 
+        patient_id = tcga_barcode_from_slide_name(file_name)
+        tcga_case_barcode = case_info.get("submitter_id") or patient_id
+
+        gdc_uuid = case_info.get("gdc_case_uuid")
+
         row = {
-            "case_id": submitter_id, # if want UUID use: case_info.get("case_id") or submitter_id,
+            "patient_id": patient_id,
+            "case_id": tcga_case_barcode,
+            "gdc_case_uuid": gdc_uuid if gdc_uuid is not None else "",
             "file_name": file_name,
             "file_id": file_id,
             "project_id": project_id,
@@ -634,7 +653,7 @@ def write_annotations_csv(rows: list[dict], out_csv: str):
         print("No annotation rows to write.")
         return
 
-    fieldnames = ["image_path", "survival_time", "death_occurred"]
+    fieldnames = ["image_path", "patient_id", "survival_time", "death_occurred"]
 
     with open(out_csv, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -650,7 +669,9 @@ def write_clinical_csv(rows: list[dict], out_csv: str):
         return
 
     fieldnames = [
+        "patient_id",
         "case_id",
+        "gdc_case_uuid",
         "file_name",
         "file_id",
         "project_id",

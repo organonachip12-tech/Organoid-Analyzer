@@ -25,3 +25,7 @@ for r in rows:
     death_counts[r["death_occurred"]] += 1
 
 print("Death counts:", death_counts)
+
+if rows and "patient_id" in rows[0]:
+    pids = {r["patient_id"] for r in rows}
+    print("Distinct patient_id:", len(pids), "(rows are per-slide; expect patient_id < rows)")

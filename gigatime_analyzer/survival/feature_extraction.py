@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 
+from gigatime_analyzer.survival.tcga_ids import tcga_barcode_from_slide_name
+
 
 def extract_features_from_tensor(output_tensor):
     """
@@ -30,10 +32,7 @@ def tile_name_to_patient_id(tile_name):
     Example:
         TCGA-2J-AAB1-01Z-00-DX1 → TCGA-2J-AAB1
     """
-    if isinstance(tile_name, (list, tuple)):
-        tile_name = tile_name[0]
-
-    return "-".join(tile_name.split("-")[:3])
+    return tcga_barcode_from_slide_name(tile_name)
 
 
 def build_patient_dataframe(outputs, ids):
