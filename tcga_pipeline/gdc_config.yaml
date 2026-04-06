@@ -1,0 +1,269 @@
+# ============================================================
+# GDC TCGA Configuration File
+# ============================================================
+# Purpose:
+# This config controls the GDC TCGA data pull and CSV generation
+# for downstream TIL / GigaTIME style workflows.
+#
+# Intended use:
+# Edit the USER SETTINGS and OUTPUT SETTINGS sections first.
+# Leave ADVANCED SETTINGS and INTERNAL SCHEMA alone unless you
+# know exactly what you are changing.
+# ============================================================
+
+
+user_settings:
+  # ----------------------------------------------------------
+  # USER SETTINGS
+  # ----------------------------------------------------------
+  # These are the main settings a normal user is expected to edit.
+  # ----------------------------------------------------------
+
+  # TCGA project to query from GDC
+  # Examples:
+  #   TCGA-BRCA
+  #   TCGA-LUAD
+  #   TCGA-UCEC
+  project_id: TCGA-BRCA
+
+  # Keep only Primary Tumor samples when possible
+  # Recommended: true
+  primary_tumor_only: true
+
+  # Optional minimum survival / follow up threshold in days
+  # Use null to disable this filter
+  # Example: 30
+  min_follow_up_days: null
+
+  # File format to use for slide retrieval
+  # Current default assumes whole slide image files in SVS format
+  slide_data_format: SVS
+
+  # Valid survival states to keep
+  # Usually leave this as Alive and Dead
+  valid_vital_statuses:
+    - Alive
+    - Dead
+
+
+output_settings:
+  # ----------------------------------------------------------
+  # OUTPUT SETTINGS
+  # ----------------------------------------------------------
+  # These are safe for users to edit if they want different
+  # naming or folder structure for outputs.
+  # The string {project_id} will be replaced automatically.
+  # ----------------------------------------------------------
+
+  # Relative or full path used to build image_path in annotations
+  images_dir: data/til/images/{project_id}
+
+  # Output CSV name for the annotations file
+  annotations_filename: annotations_gdc_{project_id}.csv
+
+  # Output CSV name for the clinical file
+  clinical_filename: clinical_gdc_{project_id}.csv
+
+
+advanced_settings:
+  # ----------------------------------------------------------
+  # ADVANCED SETTINGS
+  # ----------------------------------------------------------
+  # Most users should leave these alone.
+  # These control API behavior, runtime details, and value cleanup.
+  # ----------------------------------------------------------
+
+  # Base GDC API URL
+  base_url: https://api.gdc.cancer.gov
+
+  # Timeout for each API request in seconds
+  timeout_seconds: 60
+
+  # Number of records fetched per API request during pagination
+  page_size: 200
+
+  # Turn debug logging on or off
+  debug: false
+
+  # Optional GDC auth token for controlled access data
+  # Leave as null for public TCGA access
+  auth_token: null
+
+  # Raw placeholder values that should be treated as missing
+  invalid_placeholders:
+    - null
+    - ""
+    - "--"
+
+  # Event encoding used in survival outputs
+  dead_event_value: 1
+  alive_event_value: 0
+
+  # Expand nodes for the /cases endpoint
+  # Usually do not change unless you know the GDC response structure
+  cases_expand: diagnoses,demographic
+
+
+internal_schema:
+  # ----------------------------------------------------------
+  # INTERNAL SCHEMA
+  # ----------------------------------------------------------
+  # These define which fields are requested from GDC and which
+  # columns are written into the final CSVs.
+  #
+  # Most users should NOT change these.
+  # Change only if the Python code is also updated accordingly.
+  # ----------------------------------------------------------
+
+  # Fields pulled from the GDC /cases endpoint
+  cases_fields:
+    - submitter_id
+    - case_id
+    - demographic.vital_status
+    - demographic.days_to_death
+    - demographic.gender
+    - demographic.days_to_birth
+    - diagnoses.days_to_last_follow_up
+    - diagnoses.days_to_death
+
+  # Fields pulled from the GDC /files endpoint
+  files_fields:
+    - file_id
+    - file_name
+    - data_category
+    - data_type
+    - experimental_strategy
+    - data_format
+    - access
+    - cases.submitter_id
+    - cases.case_id
+    - cases.samples.sample_type
+    - cases.samples.submitter_id
+
+  # Output columns for the annotations CSV
+  # One row per image / slide file
+  annotations_fields:
+    - image_path
+    - patient_id
+    - survival_time
+    - death_occurred
+
+  # Output columns for the clinical CSV
+  # Includes identifiers needed for joining to image or feature tables
+  clinical_fields:
+    - patient_id
+    - case_id
+    - gdc_case_uuid
+    - file_name
+    - file_id
+    - project_id
+    - survival_time
+    - vital_status
+    - survival_time_alt
+    - days_to_death
+    - days_to_last_follow_up
+    - gender
+    - age_at_index
+
+
+filters:
+  # ----------------------------------------------------------
+  # FILTER RULES
+  # ----------------------------------------------------------
+  # These define cohort selection logic.
+  # Usually align these with the code logic in build_annotations()
+  # and build_clinical_rows().
+  # ----------------------------------------------------------
+
+  # File format rule for slide retrieval
+  slide_data_format: SVS
+
+  # Restrict to primary tumor slide files if possible
+  primary_tumor_only: true
+
+  # Which vital statuses are allowed in the cohort
+  valid_vital_statuses:
+    - Alive
+    - Dead
+
+  # Optional exclusion threshold in days
+  min_follow_up_days: null
+
+
+survival_rules:
+  # ----------------------------------------------------------
+  # SURVIVAL RULES
+  # ----------------------------------------------------------
+  # These define how survival values are interpreted.
+  # ----------------------------------------------------------
+
+  # If Dead, use days_to_death
+  dead_uses_field: days_to_death
+
+  # If Alive, use days_to_last_follow_up
+  alive_uses_field: days_to_last_follow_up
+
+  # Fallback placeholders treated as missing
+  invalid_placeholders:
+    - null
+    - ""
+    - "--"
+
+  # Final encoded event values
+  dead_event_value: 1
+  alive_event_value: 0
+
+
+output_schema_reference:
+  # ----------------------------------------------------------
+  # OUTPUT SCHEMA REFERENCE
+  # ----------------------------------------------------------
+  # Human readable notes describing what the output columns mean.
+  # This section is documentation only.
+  # ----------------------------------------------------------
+
+  annotations:
+    description: >
+      Direct image level annotations output. One row per slide file.
+      survival_time is in days. death_occurred is 1 for dead and 0 for alive.
+    columns:
+      image_path: Relative or full path to the image file
+      patient_id: Patient barcode parsed from slide filename
+      survival_time: Survival time in days
+      death_occurred: Event indicator, 1 dead, 0 alive
+
+  clinical:
+    description: >
+      Extended clinical output used for joins, inspection, and downstream
+      modeling support.
+    columns:
+      patient_id: Patient barcode parsed from slide filename
+      case_id: Human readable TCGA case barcode
+      gdc_case_uuid: Internal GDC case UUID
+      file_name: Slide file name
+      file_id: GDC file UUID
+      project_id: TCGA project ID
+      survival_time: Primary survival value in days
+      vital_status: Alive or Dead
+      survival_time_alt: Alternate survival value if needed for compatibility
+      days_to_death: Raw death days value
+      days_to_last_follow_up: Raw follow up days value
+      gender: Demographic gender field from GDC
+      age_at_index: Age in years derived from days_to_birth
+
+
+notes:
+  # ----------------------------------------------------------
+  # GENERAL NOTES
+  # ----------------------------------------------------------
+  # 1. Edit user_settings.project_id first when switching projects.
+  # 2. For most use cases, keep primary_tumor_only true.
+  # 3. Leave internal_schema unchanged unless you also update the code.
+  # 4. This config should match the current Python output schema:
+  #    annotations include patient_id
+  #    clinical includes patient_id and gdc_case_uuid
+  # 5. The Python code must load this YAML and use it instead of
+  #    hardcoded values for it to have effect.
+  # ----------------------------------------------------------
+  config_version: 1
+  intended_pipeline: GDC TCGA to TIL / GigaTIME style CSV generation
