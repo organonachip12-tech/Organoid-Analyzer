@@ -7,6 +7,10 @@ Purpose
 3. Apply cohort filtering rules such as valid survival data and optional Primary Tumor filtering
 4. Build spec compliant annotations and clinical CSV outputs
 
+Notes
+- Output schema includes patient_id and gdc_case_uuid for stable joins
+- Most runtime behavior (fields, filters, pagination, outputs) is set in config doc
+
 reusable Python wrapper around the GDC REST API plus dataset building utilities.
 """
 
@@ -14,19 +18,111 @@ import csv
 import sys
 from pathlib import Path
 
+import yaml
 import requests
 
+#add repo root directory to import path
 _repo_root = Path(__file__).resolve().parent.parent
 if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
 
-from gigatime_analyzer.survival.tcga_ids import tcga_barcode_from_slide_name
+#import the TCGA barcode parser (try lowercase, then capitalized)
+try:
+    from gigatime_analyzer.survival.tcga_ids import tcga_barcode_from_slide_name
+except ModuleNotFoundError:
+    from GigaTIME_analyzer.survival.tcga_ids import tcga_barcode_from_slide_name
 
-#turn on/off Debug global - set True/False
-DEBUG = False
+# load and validate YAML config for pipeline settings
+def load_config(config_path: str | None = None) -> dict:
+    """
+    Load YAML config once at startup.
+    If config_path is None, look for gdc_config.yaml in the same folder.
+    """
+    if config_path is None:
+        config_path = Path(__file__).resolve().parent / "gdc_config.yaml"
+    else:
+        config_path = Path(config_path)
 
-# Base URL for all GDC API endpoints
-BASE = "https://api.gdc.cancer.gov"
+    with open(config_path, "r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+
+    return config
+
+
+def validate_config(config: dict) -> None:
+    """
+    Validate required structure and expected fields in YAML config.
+
+    Ensures:
+    - required top-level sections exist
+    - project_id is provided
+    - survival status values are valid
+    - output schema matches expected pipeline format
+    """
+    required_top = [
+        "user_settings",
+        "output_settings",
+        "advanced_settings",
+        "internal_schema",
+    ]
+
+    for key in required_top:
+        if key not in config:
+            raise ValueError(f"Missing top level config section: {key}")
+
+    project_id = config["user_settings"].get("project_id")
+    if not project_id:
+        raise ValueError("user_settings.project_id must not be empty")
+
+    valid_statuses = config["user_settings"].get("valid_vital_statuses", [])
+    if sorted(valid_statuses) != ["Alive", "Dead"]:
+        raise ValueError(
+            "user_settings.valid_vital_statuses should contain Alive and Dead"
+        )
+
+    ann_fields = config["internal_schema"].get("annotations_fields", [])
+    clin_fields = config["internal_schema"].get("clinical_fields", [])
+
+    expected_ann = ["image_path", "patient_id", "survival_time", "death_occurred"]
+    expected_clin = [
+        "patient_id",
+        "case_id",
+        "gdc_case_uuid",
+        "file_name",
+        "file_id",
+        "project_id",
+        "survival_time",
+        "vital_status",
+        "survival_time_alt",
+        "days_to_death",
+        "days_to_last_follow_up",
+        "gender",
+        "age_at_index",
+    ]
+
+    if ann_fields != expected_ann:
+        raise ValueError(
+            f"annotations_fields does not match implemented schema. Got: {ann_fields}"
+        )
+
+    if clin_fields != expected_clin:
+        raise ValueError(
+            f"clinical_fields does not match implemented schema. Got: {clin_fields}"
+        )
+
+# initialize config and extract key sections
+CONFIG = load_config()
+validate_config(CONFIG)
+
+# shorthand access to config sections
+USER = CONFIG["user_settings"]
+OUTPUT = CONFIG["output_settings"]
+ADVANCED = CONFIG["advanced_settings"]
+SCHEMA = CONFIG["internal_schema"]
+
+# runtime settings (from config)
+DEBUG = ADVANCED.get("debug", False)
+BASE = ADVANCED.get("base_url", "https://api.gdc.cancer.gov")
 
 
 def gdc_post(endpoint: str, payload: dict, token: str | None = None) -> dict:
@@ -62,7 +158,13 @@ def gdc_post(endpoint: str, payload: dict, token: str | None = None) -> dict:
         headers["X-Auth-Token"] = token
 
     # Send request and limit how long we wait
-    r = requests.post(url, json=payload, headers=headers, timeout=60)
+    # use config timeout for API requests
+    r = requests.post(
+        url,
+        json=payload,
+        headers=headers,
+        timeout=ADVANCED["timeout_seconds"],
+    )
 
     # Raise an exception for HTTP errors like 400 or 403
     r.raise_for_status()
@@ -106,7 +208,7 @@ def and_filter(*filters: dict) -> dict:
     return {"op": "and", "content": list(filters)}
 
 
-def get_cases_survival(project_id: str, size: int = 1000, offset: int = 0, token: str | None = None) -> dict:
+def get_cases_survival(project_id: str, size: int | None = None, offset: int = 0, token: str | None = None) -> dict:
     """
     Query /cases for a project and return survival relevant fields.
 
@@ -124,27 +226,22 @@ def get_cases_survival(project_id: str, size: int = 1000, offset: int = 0, token
     Survival fields can appear in different nodes across releases and projects.
     This starter pulls common ones from demographic and diagnoses.
     """
-    # Keep the response small by requesting only fields we care about
-    fields = [
-        "submitter_id",
-        "case_id",
-        "demographic.vital_status",
-        "demographic.days_to_death",
-        "demographic.gender",
-        "demographic.days_to_birth",
-        "diagnoses.days_to_last_follow_up",
-        "diagnoses.days_to_death",
-    ]
+    # use fields defined in config
+    fields = SCHEMA["cases_fields"]
+
+    # use config page size unless one is provided
+    if size is None:
+        size = ADVANCED["page_size"]
 
     payload = {
-        # Restrict to one project at the case level
+        # restrict to one project at the case level
         "filters": and_filter(build_filter("project.project_id", project_id, op="=")),
         # API expects a comma separated string for fields
         "fields": ",".join(fields),
-        # Include nested objects in the response
-        "expand": "diagnoses,demographic",
+        # include nested objects in the response
+        "expand": ADVANCED.get("cases_expand", "diagnoses,demographic"),
         "format": "JSON",
-        # Pagination controls
+        # pagination controls
         "size": str(size),
         "from": str(offset),
     }
@@ -152,37 +249,18 @@ def get_cases_survival(project_id: str, size: int = 1000, offset: int = 0, token
     return gdc_post("cases", payload, token=token)
 
 
-def get_files_for_project(project_id: str, size: int = 1000, offset: int = 0, token: str | None = None) -> dict:
+def get_files_for_project(project_id: str, size: int | None = None, offset: int = 0, token: str | None = None) -> dict:
     """
     Query /files for a project and return file metadata that can be linked to cases.
-
-    This returns all files for the project unless you add additional filters.
-
-    Args
-    project_id: TCGA project id like "TCGA-BRCA"
-    size: number of records to request per call
-    offset: pagination offset, passed as "from"
-    token: optional auth token
-
-    Returns
-    JSON response dict from /files.
-    Records are usually in response["data"]["hits"].
     """
-    fields = [
-        "file_id",
-        "file_name",
-        "data_category",
-        "data_type",
-        "experimental_strategy",
-        "data_format",
-        "access",
-        # These let you join file records back to the patient
-        "cases.submitter_id",
-        "cases.case_id",
-    ]
+    fields = SCHEMA["files_fields"]
+
+    # default to config batch size if not provided
+    if size is None:
+        size = ADVANCED["page_size"]
 
     payload = {
-        # When querying /files you filter project through the linked cases object
+        # /files filters project via cases.project.project_id
         "filters": and_filter(build_filter("cases.project.project_id", project_id, op="=")),
         "fields": ",".join(fields),
         "format": "JSON",
@@ -193,41 +271,27 @@ def get_files_for_project(project_id: str, size: int = 1000, offset: int = 0, to
     return gdc_post("files", payload, token=token)
 
 
-def get_slide_files(project_id: str, size: int = 1000, offset: int = 0, token: str | None = None) -> dict:
+def get_slide_files(project_id: str, size: int | None = None, offset: int = 0, token: str | None = None) -> dict:
     """
-    Convenience wrapper to retrieve slide like files.
+    Retrieve slide-like files for a project.
 
-    Important
-    The exact labeling can vary by project.
-    Start by calling get_files_for_project once and inspect returned data_type and data_format.
-    Then tighten the slide filter based on what you see.
-
-    Current default behavior
-    This uses a conservative slide oriented filter:
-    data_format == "SVS"
-    If your project uses a different format, adjust the filter below.
+    Filters files by project and data_format (e.g., SVS) so that returned files
+    correspond to histology slides usable for downstream image-based analysis.
     """
-    fields = [
-        "file_id",
-        "file_name",
-        "data_category",
-        "data_type",
-        "experimental_strategy",
-        "data_format",
-        "access",
-        "cases.submitter_id",
-        "cases.case_id",
-        # bring sample metadata so we can enforce Primary Tumor logic
-        "cases.samples.sample_type",
-        "cases.samples.submitter_id",
-    ]
+    fields = SCHEMA["files_fields"]
+
+   # default to config page size if not provided
+    if size is None:
+        size = ADVANCED["page_size"]
 
     slide_filter = and_filter(
         build_filter("cases.project.project_id", project_id, op="="),
-        build_filter("data_format", "SVS", op="="),
+        # restrict to slide file formats defined in config (typically SVS)
+        build_filter("data_format", USER["slide_data_format"], op="="),
     )
 
     payload = {
+        # /files requires filtering through cases.project.project_id
         "filters": slide_filter,
         "fields": ",".join(fields),
         "format": "JSON",
@@ -236,20 +300,6 @@ def get_slide_files(project_id: str, size: int = 1000, offset: int = 0, token: s
     }
 
     return gdc_post("files", payload, token=token)
-
-
-def join_key_note() -> str:
-    """
-    Join guidance for you or teammates.
-
-    To link slides back to survival:
-    cases_resp["data"]["hits"] has submitter_id and case_id
-    files_resp["data"]["hits"] has cases as a list, each with submitter_id and case_id
-
-    The most stable join key for humans is usually:
-    submitter_id
-    """
-    return "Join cases and files on submitter_id when available; file hits include cases as a list."
 
 def get_days_to_last_follow_up(case_hit: dict):
     """
@@ -372,13 +422,12 @@ def clean_survival_value(value):
     "--" → None
     None → None
     """
-    if value in [None, "", "--"]:
+    if value in ADVANCED["invalid_placeholders"]:
         return None
 
     try:
         return float(value)
     except (TypeError, ValueError):
-        # If conversion fails, treat as missing
         return None
 
 def get_age_at_index(days_to_birth):
@@ -396,19 +445,17 @@ def get_age_at_index(days_to_birth):
 
 def is_valid_survival_case(case_info: dict, min_follow_up_days: float | None = None) -> bool:
     """
-    Check whether a case satisfies the survival rules from section 4.
+    Check whether a case has the survival information needed for downstream use.
 
-    Rules:
-    - vital_status must be Alive or Dead
-    - Dead requires days_to_death
-    - Alive requires days_to_last_follow_up
-    - optionally exclude very short follow-up
+    A valid case must have an allowed vital_status and the matching time field:
+    days_to_death for Dead cases or days_to_last_follow_up for Alive cases.
     """
     vital_status = case_info.get("vital_status")
     days_to_death = clean_survival_value(case_info.get("days_to_death"))
     days_to_last_follow_up = clean_survival_value(case_info.get("days_to_last_follow_up"))
 
-    if vital_status not in ["Alive", "Dead"]:
+    # keep only configured survival status values
+    if vital_status not in USER["valid_vital_statuses"]:
         return False
 
     if vital_status == "Dead" and days_to_death is None:
@@ -417,7 +464,6 @@ def is_valid_survival_case(case_info: dict, min_follow_up_days: float | None = N
     if vital_status == "Alive" and days_to_last_follow_up is None:
         return False
 
-    # optional short follow-up exclusion
     if min_follow_up_days is not None:
         if vital_status == "Dead" and days_to_death is not None and days_to_death < min_follow_up_days:
             return False
@@ -452,23 +498,21 @@ def compute_survival_fields(case_info: dict):
 
     This matches Kaplan–Meier / survival modeling expectations.
     """
-
-    # Extract raw values from case_info
     vital_status = case_info.get("vital_status")
-
-    # Clean and normalize survival fields
+    
     days_to_death = clean_survival_value(case_info.get("days_to_death"))
     days_to_last_follow_up = clean_survival_value(case_info.get("days_to_last_follow_up"))
 
-    # Case 1: patient died → event observed
+    # If the patient is dead, survival time is days to death.
+    # Event value (usually 1) is pulled from config to support various downstream models.
     if vital_status == "Dead" and days_to_death is not None:
-        return days_to_death, 1
+        return days_to_death, ADVANCED["dead_event_value"]
 
-    # Case 2: patient alive → censored observation
+    # If the patient is alive, survival time is days to last follow-up (censored).
+    # Event value (usually 0) is pulled from config.
     if vital_status == "Alive" and days_to_last_follow_up is not None:
-        return days_to_last_follow_up, 0
+        return days_to_last_follow_up, ADVANCED["alive_event_value"]
 
-    # Any unexpected value → drop later
     return None, None
 
 def build_annotations(
@@ -653,7 +697,8 @@ def write_annotations_csv(rows: list[dict], out_csv: str):
         print("No annotation rows to write.")
         return
 
-    fieldnames = ["image_path", "patient_id", "survival_time", "death_occurred"]
+    # Write columns defined in config doc.
+    fieldnames = SCHEMA["annotations_fields"]
 
     with open(out_csv, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -668,21 +713,8 @@ def write_clinical_csv(rows: list[dict], out_csv: str):
         print("No clinical rows to write.")
         return
 
-    fieldnames = [
-        "patient_id",
-        "case_id",
-        "gdc_case_uuid",
-        "file_name",
-        "file_id",
-        "project_id",
-        "survival_time",
-        "vital_status",
-        "survival_time_alt",
-        "days_to_death",
-        "days_to_last_follow_up",
-        "gender",
-        "age_at_index",
-    ]
+    # Write columns in the configured schema order.
+    fieldnames = SCHEMA["clinical_fields"]
 
     with open(out_csv, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -690,90 +722,91 @@ def write_clinical_csv(rows: list[dict], out_csv: str):
         writer.writerows(rows)
 
 def fetch_all_cases(project_id: str, token: str | None = None):
-    # list to store all case records across pages
+    """
+    Retrieve all case records for a project by paginating through the API.
+    """
     all_hits = []
-
-    # starting position (first page)
     offset = 0
+    
+    # page through the API in configurable batch sizes to control request count and memory footprint
+    # set in config doc
+    size = ADVANCED["page_size"]
 
-    # number of records to fetch per request
-    size = 200
-
-    # loop through all pages
     while True:
-        # request one "page" of cases
         resp = get_cases_survival(project_id, size=size, offset=offset, token=token)
-
-        # extract records from response
         hits = resp.get("data", {}).get("hits", [])
 
-        # stop if no more data
+        # halt pagination if the API returns an empty page
         if not hits:
             break
 
-        # add current page of results to full list
         all_hits.extend(hits)
 
-        # optional debug: track progress
         if DEBUG:
             print(f"[PAGINATION][CASES] fetched {len(all_hits)}")
 
-        # move to next page
+        # advance the starting offset to fetch the next block of records
         offset += size
 
-        # if last page (fewer results than requested), stop
+        # stop if the current page returned fewer records than the maximum batch size
         if len(hits) < size:
             break
 
-    # return in same structure as original API response
     return {"data": {"hits": all_hits}}
 
+
 def fetch_all_files(project_id: str, token: str | None = None):
-    # collect all file records across pages
+    """
+    Retrieve all slide file records for a project by paginating through the API.
+    """
     all_hits = []
-
-    # starting position (first page)
     offset = 0
-
-    # number of records per API request (page size)
-    size = 200
+    
+    # use configured page size to dictate /files pagination chunks
+    # set in config doc
+    size = ADVANCED["page_size"]
 
     while True:
-        # fetch one page of slide files
         resp = get_slide_files(project_id, size=size, offset=offset, token=token)
-
-        # extract records from response
         hits = resp.get("data", {}).get("hits", [])
 
-        # stop when no more data is returned
+        # halt pagination if the API returns an empty page
         if not hits:
             break
 
-        # accumulate results across pages
         all_hits.extend(hits)
 
-        # debug progress so you can see pagination working
         if DEBUG:
             print(f"[PAGINATION][FILES] fetched {len(all_hits)}")
 
-        # move to next page
+        # advance the starting offset to fetch the next block of records
         offset += size
 
-        # last page check (fewer results than requested)
+        # stop if the current page returned fewer records than the maximum batch size
         if len(hits) < size:
             break
 
-    # return in same structure as original API response
     return {"data": {"hits": all_hits}}
 
-# Save annotation rows to project-specific CSV file with Willems naming convention
+
+def render_template(template: str, project_id: str) -> str:
+    """
+    Fill {project_id} in output filename templates.
+    """
+    return template.format(project_id=project_id)
+
+
+# Save annotation rows to project-specific CSV file (name set in config doc)
 def write_project_annotations_csv(project_id: str, rows: list[dict]):
-    out_csv = f"annotations_gdc_{project_id}.csv"
+    # set in config doc
+    out_csv = render_template(OUTPUT["annotations_filename"], project_id)
     write_annotations_csv(rows, out_csv)
     return out_csv
 
-# Save clinical rows to project-specific CSV file with Willems naming convention
+
+# Save clinical rows to project-specific CSV file (name set in config doc)
 def write_project_clinical_csv(project_id: str, rows: list[dict]):
-    out_csv = f"clinical_gdc_{project_id}.csv"
+    # set in config doc
+    out_csv = render_template(OUTPUT["clinical_filename"], project_id)
     write_clinical_csv(rows, out_csv)
     return out_csv

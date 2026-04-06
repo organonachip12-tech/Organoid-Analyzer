@@ -14,22 +14,28 @@ What this script verifies
 """
 
 from gdc_tcga import (
+    USER,
+    OUTPUT,
+    ADVANCED,
     fetch_all_cases,
     fetch_all_files,
     build_annotations,
     build_clinical_rows,
     write_project_annotations_csv,
     write_project_clinical_csv,
+    render_template,
 )
 
-# Pick a TCGA project to test
-PROJECT = "TCGA-BRCA"
+# set a TCGA project to test
+PROJECT = USER["project_id"]
+TOKEN = ADVANCED.get("auth_token")
+IMAGES_DIR = render_template(OUTPUT["images_dir"], PROJECT)
 
 # Fetch the full dataset using pagination
 # This is necessary because the first page of /cases and the first page of /files
 # are not guaranteed to overlap on submitter_id
-cases_resp = fetch_all_cases(PROJECT)
-files_resp = fetch_all_files(PROJECT)
+cases_resp = fetch_all_cases(PROJECT, token=TOKEN)
+files_resp = fetch_all_files(PROJECT, token=TOKEN)
 
 # Basic structure checks
 # Top level keys should include "data" for successful responses
@@ -71,9 +77,9 @@ else:
 annotations = build_annotations(
     cases_resp,
     files_resp,
-    images_dir=f"data/til/images/{PROJECT}",
-    primary_tumor_only=True,
-    min_follow_up_days=None,  # optional exclusion creteria
+    images_dir=IMAGES_DIR,
+    primary_tumor_only=USER["primary_tumor_only"],
+    min_follow_up_days=USER["min_follow_up_days"],
 )
 
 # Build extended clinical CSV rows using the same filtered cohort logic
@@ -81,8 +87,8 @@ clinical_rows = build_clinical_rows(
     cases_resp,
     files_resp,
     project_id=PROJECT,
-    primary_tumor_only=True,
-    min_follow_up_days=None,
+    primary_tumor_only=USER["primary_tumor_only"],
+    min_follow_up_days=USER["min_follow_up_days"],
 )
 
 print("\nannotation rows count:", len(annotations))
