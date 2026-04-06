@@ -26,11 +26,7 @@ _repo_root = Path(__file__).resolve().parent.parent
 if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
 
-#import the TCGA barcode parser (try lowercase, then capitalized)
-try:
-    from gigatime_analyzer.survival.tcga_ids import tcga_barcode_from_slide_name
-except ModuleNotFoundError:
-    from GigaTIME_analyzer.survival.tcga_ids import tcga_barcode_from_slide_name
+from gigatime_analyzer.survival.tcga_ids import tcga_barcode_from_slide_name
 
 # load and validate YAML config for pipeline settings
 def load_config(config_path: str | None = None) -> dict:
