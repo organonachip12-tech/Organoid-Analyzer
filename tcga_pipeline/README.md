@@ -1,7 +1,7 @@
 # TCGA Data Pipeline
 
 A Python pipeline for querying the GDC (Genomic Data Commons) API and building structured datasets from TCGA cancer cohorts. It pulls patient survival data and H&E slide file metadata, filters for valid cohorts, and outputs two CSV files for downstream survival modeling.
-
+The pipeline is fully config-driven - users should modify gdc_config.yaml rather than editing code.
 ---
 
 ## What This Pipeline Does
@@ -20,7 +20,7 @@ A Python pipeline for querying the GDC (Genomic Data Commons) API and building s
 - Install dependencies:
 
 ```bash
-pip install requests
+pip install requests pyyaml
 ```
 
 > `csv` is built into Python and does not need to be installed separately.
@@ -32,8 +32,7 @@ pip install requests
 | File | Description |
 |---|---|
 | `gdc_tcga.py` | Core pipeline module — handles all API calls, filtering, and CSV writing |
-| `test_gdc_tcga.py` | Run script — executes the pipeline and verifies outputs |
-| `check_data.py` | Quick data check script — loads the most recent annotations CSV and prints row count, death vs survival counts, and distinct patient IDs |
+| `test_gdc_tcga.py` | Run script — executes the pipeline |
 | `gdc_config.yaml` | Config file — change project, filters, and output settings here |
 
 ---
@@ -54,15 +53,24 @@ python test_gdc_tcga.py
 
 ## Configuration
 
-All pipeline settings are controlled through `gdc_config.yaml`. You should never need to edit `gdc_tcga.py` directly to change how the pipeline runs.
+All pipeline settings are controlled through gdc_config.yaml.
+
+The most important section is:
+
+user_settings:
+  project_id: TCGA-BRCA
+
+You can also adjust filtering and runtime behavior in the config file if needed.
+
+Do not modify internal_schema unless you are also updating the code.
 
 ### Changing the Cancer Cohort
 
 To switch to a different TCGA project, change the `project_id`:
 
 ```yaml
-project:
-  project_id: TCGA-PAAD  # pancreatic cancer
+user_settings:
+  project_id: TCGA-PAAD   # Pancreatic Cancer
 ```
 
 Common project IDs:
@@ -103,6 +111,7 @@ Input file for the survival model. Contains one row per slide.
 
 | Column | Description |
 |---|---|
+| `patient_id` | TCGA patient barcode used for joins |
 | `image_path` | Path to the H&E slide image file |
 | `survival_time` | Days the patient was observed |
 | `death_occurred` | 1 if the patient died, 0 if alive (censored) |
