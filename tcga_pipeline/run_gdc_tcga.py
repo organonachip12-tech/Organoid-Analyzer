@@ -1,16 +1,14 @@
 """
-test_gdc_tcga.py
+run_gdc_tcga.py
 
-Quick test script for gdc_tcga.py
+Run script for gdc_tcga.py
 
-What this script verifies
-1. We can successfully call the GDC /cases endpoint for a TCGA project
-2. We can successfully call the GDC /files endpoint for slide like files
-3. The responses have the expected shape: response["data"]["hits"] is a list
-4. The first returned record has the fields we requested
-5. We can fetch the full dataset using pagination
-6. We can build joined annotation rows and extended clinical rows
-7. We can write the final project specific CSV outputs
+What this script does
+1. Calls the GDC /cases endpoint for a TCGA project
+2. Calls the GDC /files endpoint for slide-like files
+3. Fetches the full dataset using pagination
+4. Builds joined annotation rows and extended clinical rows
+5. Writes the final project-specific CSV outputs
 """
 
 from gdc_tcga import (
