@@ -32,7 +32,7 @@ pip install requests pyyaml
 | File | Description |
 |---|---|
 | `gdc_tcga.py` | Core pipeline module — handles all API calls, filtering, and CSV writing |
-| `test_gdc_tcga.py` | Run script — executes the pipeline |
+| `run_gdc_tcga.py` | Run script — executes the pipeline |
 | `gdc_config.yaml` | Config file — change project, filters, and output settings here |
 
 ---
@@ -44,7 +44,7 @@ pip install requests pyyaml
 3. Run the pipeline:
 
 ```bash
-python test_gdc_tcga.py
+python run_gdc_tcga.py
 ```
 
 > **Note:** confirm the exact run command with the team — this may be updated.
