@@ -1,0 +1,6 @@
+image_path,survival_time,death_occurred
+./images/TCGA-A1-A0SD-01Z-00-DX1.png,456,1
+./images/TCGA-A1-A0SE-01Z-00-DX1.png,1095,0
+./images/TCGA-A1-A0SF-01Z-00-DX1.png,730,1
+./images/TCGA-A1-A0SG-01Z-00-DX1.png,1825,0
+./images/TCGA-A1-A0SH-01Z-00-DX1.png,365,1

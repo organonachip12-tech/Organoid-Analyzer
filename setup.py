@@ -38,10 +38,14 @@ def create_directories():
     directories = [
         "Data",
         "Generated",
-        "Generated/models", 
+        "Generated/models",
         "Results",
         "TIL-Analyzer-main/images",
-        "TIL-Analyzer-main/chip annotations"
+        "TIL-Analyzer-main/chip annotations",
+        "data/gigatime",
+        "data/gigatime/svs",
+        "data/gigatime/preprocessed_tiles",
+        "results/gigatime",
     ]
     
     for directory in directories:
@@ -91,7 +95,11 @@ def verify_installation():
         ("PIL", "Pillow"),
         ("lifelines", "Lifelines"),
         ("umap", "UMAP"),
-        ("shap", "SHAP")
+        ("shap", "SHAP"),
+        ("openslide", "OpenSlide"),
+        ("albumentations", "Albumentations"),
+        ("huggingface_hub", "HuggingFace Hub"),
+        ("skimage", "Scikit-Image"),
     ]
     
     print("\n🔍 Verifying package installation...")
@@ -152,7 +160,7 @@ track_features = ["TRACK_DISPLACEMENT", "TRACK_STD_SPEED",
 
 def main():
     """Main setup function."""
-    print("🚀 Setting up Organoid Analyzer & TIL Analyzer")
+    print("🚀 Setting up Organoid Analyzer, TIL Analyzer & GigaTIME Analyzer")
     print("=" * 50)
     
     # Check Python version

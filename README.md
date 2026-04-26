@@ -1,9 +1,10 @@
-# Organoid Analyzer & TIL Analyzer
+# Organoid Analyzer, TIL Analyzer & GigaTIME
 
-This repository contains two complementary biomedical analysis tools for cancer research:
+This repository contains three complementary biomedical analysis tools for cancer research:
 
 - **Organoid Analyzer**: Analyzes cell tracking data from microscopy videos to predict treatment responses
 - **TIL Analyzer**: Analyzes tumor-infiltrating lymphocyte (TIL) images for survival prediction
+- **GigaTIME**: Predicts multiplex immunofluorescence (mIF) from H&E histology using a U-Net++ model
 
 ## Overview
 
@@ -18,6 +19,12 @@ The TIL Analyzer analyzes tumor-infiltrating lymphocyte images to predict patien
 - **Deep learning**: ResNet18-based neural network for image feature extraction
 - **Survival analysis**: Neural network survival modeling for time-to-event prediction
 - **Visualization**: UMAP projections and survival curve generation
+
+### GigaTIME
+GigaTIME predicts multiplex immunofluorescence (mIF) channel intensities from H&E-stained histology images. It uses:
+- **U-Net++ architecture**: Deep learning model for image-to-image translation
+- **23 mIF channels**: Predicts protein expression maps from H&E input
+- **Tile or whole-slide**: Run on single 556×556 tiles or full SVS slides (tiled automatically)
 
 ## Installation
 
@@ -175,6 +182,51 @@ python main_test.py
 python generateImage.py
 ```
 
+### GigaTIME
+
+GigaTIME can be run via the **web UI** (easiest) or the **command-line**.
+
+#### Option A: Web UI (recommended)
+
+1. **Start the frontend:**
+```bash
+python run_frontend.py
+```
+
+2. Open http://localhost:5000 in your browser.
+
+3. Go to the **GigaTIME** tab.
+
+4. **Tile mode**: Upload a single H&E tile (556×556 PNG/JPEG). Click "Run GigaTIME Inference" to get mIF predictions for 23 channels.
+
+5. **Slide mode**: Upload a whole-slide image (SVS). The slide is preprocessed into tiles, inference runs on each tile, and you get aggregated channel maps and statistics.
+
+**First run**: The pretrained model is downloaded automatically from HuggingFace (`prov-gigatime/GigaTIME`). If download fails, set `HF_TOKEN` or place `model.pth` in `data/gigatime/`.
+
+#### Option B: Command-line
+
+```bash
+# 1. Preprocess SVS slides into tiles (optional)
+python -m gigatime_analyzer.training.main --mode preprocess --svs_dir ./data/gigatime/svs
+
+# 2. Run inference on preprocessed tiles
+python -m gigatime_analyzer.training.main --mode infer \
+  --tiling_dir ./data/gigatime/preprocessed_tiles \
+  --metadata ./data/gigatime/preprocessed_tiles/preprocessed_metadata.csv \
+  --name my_run
+```
+
+For inference, the CLI loads the pretrained model from `output_dir/model.pth` or downloads from HuggingFace. Use `--hf_token YOUR_TOKEN` or `HF_TOKEN` if the repo is gated.
+
+#### Option C: Training (advanced)
+
+```bash
+python -m gigatime_analyzer.training.main --mode train \
+  --tiling_dir ./data/gigatime/preprocessed_tiles \
+  --metadata ./data/gigatime/preprocessed_tiles/preprocessed_metadata.csv \
+  --epochs 300 --batch_size 16
+```
+
 ## Configuration
 
 ### Organoid Analyzer Configuration (`Config.py`)
@@ -214,6 +266,11 @@ Key settings to modify in `main_test.py`:
 - `UMAP/`: Dimensionality reduction visualizations
 - `metrics*.xlsx`: Statistical analysis results
 
+### GigaTIME Outputs:
+- **Web UI**: Probability maps and binary masks per channel, stats table, downloadable CSV/JSON
+- **CLI**: `results/gigatime/` or `--output_dir` with metrics and model checkpoints
+- **Model**: `data/gigatime/model.pth` (pretrained, auto-downloaded)
+
 ## Model Architectures
 
 ### Organoid Analyzer: UnifiedFusionModel
@@ -246,6 +303,19 @@ Key settings to modify in `main_test.py`:
 4. **Data format errors:**
    - Verify Excel file sheet names match Config.py
    - Check CSV column headers match expected format
+
+### GigaTIME-Specific:
+
+5. **NumPy / OpenCV compatibility:**
+   - The project pins `numpy==1.26.4` and `opencv-python==4.8.1.78` for GigaTIME stability with PyTorch and Albumentations.
+   - If you see dependency conflicts, create a fresh venv and install from `requirements.txt`.
+
+6. **CPU-only execution:**
+   - GigaTIME runs on CPU when CUDA is unavailable (device-agnostic `.to(device)`).
+   - Inference is slower on CPU; use GPU when possible.
+
+7. **HuggingFace model download fails:**
+   - Set `HF_TOKEN` if the repo is gated, or place `model.pth` in `data/gigatime/` manually.
 
 ### Performance Tips:
 
