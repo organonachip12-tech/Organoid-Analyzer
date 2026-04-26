@@ -101,7 +101,9 @@ def collect_tile_outputs(tile_dir, model, device, window_size=256):
 
             out = torch.sigmoid(out)
             outputs.append(out.cpu())
-            tile_ids.append(os.path.splitext(os.path.basename(tile_path))[0])
+            # Patient ID is encoded in the parent directory name (slide stem),
+            # not the tile filename (which is just x_y_size_size_he).
+            tile_ids.append(os.path.basename(os.path.dirname(tile_path)))
 
     print(f"Inference complete: {len(outputs)} tiles processed")
     return outputs, tile_ids
