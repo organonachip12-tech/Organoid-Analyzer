@@ -2,7 +2,7 @@
 Run TCGA pipeline:
 - Fetch cases + files from GDC
 - Build annotations (image_path, patient_id, survival_time, death_occurred)
-- Save to Data/gigatime/annotations.csv (used by GigaTIME pipeline)
+- Save to data/gigatime/annotations.csv (used by GigaTIME pipeline)
 """
 
 import os
@@ -44,7 +44,7 @@ def main():
     rows = build_annotations(
         cases_resp,
         files_resp,
-        images_dir="Data/gigatime/images",  # 🔥 MUST match your actual image folder
+        images_dir="data/gigatime/images",  # must match your actual image folder
         primary_tumor_only=USER.get("primary_tumor_only", True),
         min_follow_up_days=USER.get("min_follow_up_days"),
     )
@@ -59,9 +59,9 @@ def main():
     # -----------------------------------
     print("\n💾 Saving annotations...")
 
-    os.makedirs("Data/gigatime", exist_ok=True)
+    os.makedirs("data/gigatime", exist_ok=True)
 
-    output_csv = "Data/gigatime/annotations.csv"
+    output_csv = "data/gigatime/annotations.csv"
 
     write_annotations_csv(rows, output_csv)
 

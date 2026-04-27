@@ -2,7 +2,7 @@
 Full end-to-end pipeline:
 
 1. TCGA data pipeline
-   → builds Data/gigatime/annotations.csv
+   → builds data/gigatime/annotations.csv
 
 2. GigaTIME + Survival pipeline
    → runs inference, feature extraction, Cox model, SHAP
@@ -23,8 +23,10 @@ def run_gigatime_pipeline():
     print("STEP 1: GigaTIME + SURVIVAL")
     print("==============================")
 
+    import sys
     from gigatime_analyzer.scripts.run_pipeline import main as giga_main
 
+    sys.argv = ["run_pipeline", "--mode", "train"]
     giga_main()
 
 
