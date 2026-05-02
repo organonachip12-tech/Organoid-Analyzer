@@ -6,6 +6,7 @@ organoid_venv/
 
 # Python cache
 __pycache__/
+*.egg-info/
 *.pyc
 *.pyo
 *.pyd

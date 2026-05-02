@@ -130,7 +130,8 @@ The pretrained model downloads automatically from HuggingFace on first run. Plac
    - Update `FIJI_PATH` in Config.py
 
 3. **Missing dependencies:**
-   - Run `python setup.py` to verify installation
+   - From the repo root: `pip install -e .` (editable install; dependencies come from `requirements.txt`)
+   - Optional full setup (dirs + verify): `organoid-dev-bootstrap` or `python -m organoid_analyzer.dev_bootstrap`
    - Check CUDA version compatibility
 
 4. **Data format errors:**
