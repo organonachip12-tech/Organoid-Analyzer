@@ -307,8 +307,8 @@ Key settings to modify in `main_test.py`:
 ### GigaTIME-Specific:
 
 5. **NumPy / OpenCV compatibility:**
-   - The project pins `numpy==1.26.4` and `opencv-python==4.8.1.78` for GigaTIME stability with PyTorch and Albumentations.
-   - If you see dependency conflicts, create a fresh venv and install from `requirements.txt`.
+   - Use **NumPy 2.x** with **opencv-python ≥ 4.10** so binary wheels match (avoids `cv2` / `_ARRAY_API` errors when SHAP imports OpenCV).
+   - If you see dependency conflicts, recreate the venv and `pip install -e .` from a clean environment.
 
 6. **CPU-only execution:**
    - GigaTIME runs on CPU when CUDA is unavailable (device-agnostic `.to(device)`).

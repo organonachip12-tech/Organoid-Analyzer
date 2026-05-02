@@ -142,6 +142,11 @@ The pretrained model downloads automatically from HuggingFace on first run. Plac
    - Set `HF_TOKEN` environment variable if the HuggingFace repo is gated
    - Or manually download `model.pth` and place in `data/gigatime/`
 
+6. **HPC / full home quota / NumPy + OpenCV errors:**
+   - Export `SCRATCH` before running training: preprocessed tiles default to `$SCRATCH/gigatime_work/preprocessed_tiles` (override with `GIGATIME_TILES_DIR` if needed).
+   - The pipeline sets matplotlib caches under `$SCRATCH/.organoid_analyzer_cache` when those env vars are unset.
+   - Use **NumPy 2.x** with **opencv-python ≥ 4.10** from a fresh `pip install -e .` so SHAP → OpenCV does not hit `_ARRAY_API` mismatches.
+
 ### Performance Tips:
 
 - **GPU**: Both projects benefit significantly from GPU acceleration

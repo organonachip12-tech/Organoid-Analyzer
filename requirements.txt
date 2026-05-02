@@ -1,7 +1,7 @@
 # Unified Requirements for Organoid Analyzer, TIL Analyzer & GigaTIME
 # Core scientific computing
-# NumPy 1.26.4 for GigaTIME compatibility (PyTorch/Albumentations); opencv 4.8.1.78 matches
-numpy==1.26.4
+# NumPy 2.x + opencv-python>=4.10: binary wheels aligned (fixes cv2 _ARRAY_API vs NumPy 2 on HPC)
+numpy>=2.0.0,<3
 pandas==2.3.2
 scipy==1.15.3
 scikit-learn==1.7.2
@@ -11,8 +11,8 @@ torch>=2.0.0
 torchvision>=0.15.0
 torchaudio>=2.0.0
 
-# Image processing (4.8.1.78 for NumPy 1.x compatibility with GigaTIME/Albumentations)
-opencv-python==4.8.1.78
+# Image processing (requires NumPy 2–compatible wheels; shap→opencv import chain)
+opencv-python>=4.10.0.84,<5
 pillow==11.3.0
 tifffile==2025.5.10
 

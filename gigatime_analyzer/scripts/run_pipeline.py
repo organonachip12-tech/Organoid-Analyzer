@@ -18,6 +18,8 @@ import sys
 import numpy as np
 import torch
 
+from gigatime_analyzer.runtime_env import configure_runtime_caches
+
 
 # ---------------------------------------------------------------------------
 # H&E-only inference (no paired mIF data needed)
@@ -122,7 +124,6 @@ def train_pipeline(args):
     from pathlib import Path
 
     from gigatime_analyzer.survival.feature_extraction import build_patient_dataframe
-    from gigatime_analyzer.survival.shap_analysis import generate_report
     from gigatime_analyzer.survival.survival_model import (
         evaluate_model,
         preprocess_data,
@@ -201,8 +202,10 @@ def train_pipeline(args):
     save_model(cox_model, scaler, feature_cols, cox_out)
     print(f"Cox model saved → {cox_out}")
 
-    # Step 8: Generate analysis plots for lab report
+    # Step 8: Generate analysis plots for lab report (lazy import: shap → opencv)
     print("\nStep 8: Generating analysis plots...")
+    from gigatime_analyzer.survival.shap_analysis import generate_report
+
     shap_dir = os.path.join(out_dir, "plots")
     generate_report(cox_model, df, feature_cols, save_path=shap_dir)
 
@@ -319,6 +322,7 @@ def parse_args():
 
 
 def main():
+    configure_runtime_caches()
     args = parse_args()
     if args.mode == "train":
         train_pipeline(args)

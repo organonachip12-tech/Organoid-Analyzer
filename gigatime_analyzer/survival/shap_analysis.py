@@ -2,9 +2,10 @@
 
 import os
 
-import matplotlib.pyplot as plt
 import numpy as np
-import shap
+
+# matplotlib / shap imported inside plotting helpers so training can run preprocessing
+# before heavy deps (shap pulls opencv) and so MPLCONFIGDIR can be set first.
 
 # Biological names for the first 21 GigaTIME output channels
 MARKER_NAMES = [
@@ -37,6 +38,9 @@ def run_shap_analysis(cph, df, feature_cols, save_path="results/plots"):
         shap_beeswarm.png  — per-patient marker contributions (colour = feature value)
         shap_importance.png — mean |SHAP| bar chart (overall ranking)
     """
+    import matplotlib.pyplot as plt
+    import shap
+
     os.makedirs(save_path, exist_ok=True)
 
     X = df[feature_cols]
@@ -82,6 +86,7 @@ def plot_kaplan_meier(cph, df, feature_cols, save_path):
 
     Saves: kaplan_meier.png
     """
+    import matplotlib.pyplot as plt
     from lifelines import KaplanMeierFitter
     from lifelines.statistics import logrank_test
 
@@ -139,6 +144,8 @@ def plot_forest(cph, feature_cols, save_path):
 
     Saves: forest_plot.png
     """
+    import matplotlib.pyplot as plt
+
     os.makedirs(save_path, exist_ok=True)
 
     rename = _rename_map(feature_cols)
