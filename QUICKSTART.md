@@ -147,6 +147,11 @@ The pretrained model downloads automatically from HuggingFace on first run. Plac
    - The pipeline sets matplotlib caches under `$SCRATCH/.organoid_analyzer_cache` when those env vars are unset.
    - Use **NumPy 2.x** with **opencv-python ≥ 4.10** from a fresh `pip install -e .` so SHAP → OpenCV does not hit `_ARRAY_API` mismatches.
 
+7. **`git pull` fails with `Disk quota exceeded` on `.git/FETCH_HEAD`:**
+   - **Why:** Your **home directory** (`$HOME`, often ~50 GB or less) and **scratch** (`$SCRATCH`, terabytes) have **separate quotas**. Git writes under the repo directory (`.git/` lives next to your code). If the repo is in `~/Organoid-Analyzer`, every `fetch`/`pull` uses **home** space—not scratch—so a full home breaks git even when scratch is empty.
+   - **Fix (recommended):** Keep the clone on scratch and work from there, e.g. `cd $SCRATCH && git clone <repo-url> Organoid-Analyzer && cd Organoid-Analyzer` (or `mv ~/Organoid-Analyzer $SCRATCH/` if home still has room for one move). Run `pip install -e .` inside that copy; open notebooks/scripts from `$SCRATCH/...`.
+   - **Fix (free home):** Remove or relocate heavy dirs under `$HOME` (old conda envs, `~/.cache/pip`, HuggingFace cache, duplicate datasets). Point caches at scratch: e.g. `export XDG_CACHE_HOME=$SCRATCH/.cache` and `export HF_HOME=$SCRATCH/.hf` in your shell profile.
+
 ### Performance Tips:
 
 - **GPU**: Both projects benefit significantly from GPU acceleration
