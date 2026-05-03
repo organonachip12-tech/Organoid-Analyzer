@@ -146,6 +146,9 @@ The pretrained model downloads automatically from HuggingFace on first run. Plac
    - Export `SCRATCH` before running training: preprocessed tiles default to `$SCRATCH/gigatime_work/preprocessed_tiles` (override with `GIGATIME_TILES_DIR` if needed).
    - The pipeline sets matplotlib caches under `$SCRATCH/.organoid_analyzer_cache` when those env vars are unset.
    - Use **NumPy 2.x** with **opencv-python ≥ 4.10** from a fresh `pip install -e .` so SHAP → OpenCV does not hit `_ARRAY_API` mismatches.
+   - **`pip install` fails with quota on `~/.cache/pip`:** point pip and temp files at scratch before installing:  
+     `export PIP_CACHE_DIR=$SCRATCH/.cache/pip TMPDIR=$SCRATCH/tmp && mkdir -p "$PIP_CACHE_DIR" "$TMPDIR"`  
+     then `pip install -e .` (add `--no-cache-dir` if needed).
 
 7. **`git pull` fails with `Disk quota exceeded` on `.git/FETCH_HEAD`:**
    - **Why:** Your **home directory** (`$HOME`, often ~50 GB or less) and **scratch** (`$SCRATCH`, terabytes) have **separate quotas**. Git writes under the repo directory (`.git/` lives next to your code). If the repo is in `~/Organoid-Analyzer`, every `fetch`/`pull` uses **home** space—not scratch—so a full home breaks git even when scratch is empty.
