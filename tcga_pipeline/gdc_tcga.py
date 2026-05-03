@@ -26,7 +26,24 @@ _repo_root = Path(__file__).resolve().parent.parent
 if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
 
-from gigatime_analyzer.survival.tcga_ids import tcga_barcode_from_slide_name
+# Parse TCGA patient/case barcodes from slide filenames.
+# Prefer the project parser when available. If package imports fail,
+# use the same first-three-segments rule locally.
+try:
+    from gigatime_analyzer.survival.tcga_ids import tcga_barcode_from_slide_name
+except ModuleNotFoundError:
+    try:
+        from GigaTIME_analyzer.survival.tcga_ids import tcga_barcode_from_slide_name
+    except ModuleNotFoundError:
+        def tcga_barcode_from_slide_name(slide_name: str) -> str:
+            """Return the TCGA patient/case barcode from a TCGA slide filename."""
+            name = Path(slide_name).stem
+            parts = name.split("-")
+
+            if len(parts) >= 3 and parts[0].upper() == "TCGA":
+                return "-".join(parts[:3])
+
+            raise ValueError(f"Could not extract TCGA barcode from slide name: {slide_name}")
 
 # load and validate YAML config for pipeline settings
 def load_config(config_path: str | None = None) -> dict:
