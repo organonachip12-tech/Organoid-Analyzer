@@ -24,7 +24,7 @@ user_settings:
   #   TCGA-BRCA
   #   TCGA-LUAD
   #   TCGA-UCEC
-  project_id: TCGA-BRCA
+  project_id: TCGA-PAAD
 
   # Keep only Primary Tumor samples when possible
   # Recommended: true
