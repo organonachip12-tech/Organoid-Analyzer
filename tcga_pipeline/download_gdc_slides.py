@@ -1,13 +1,21 @@
 """
 download_gdc_slides.py
 
-Download TCGA whole slide image files from GDC, with optional upload to Wasabi.
+Download TCGA whole slide image files from GDC.
 
-Purpose
-1. Read slide metadata from clinical_gdc_TCGA-PAAD.csv
-2. Use GDC file_id values to download SVS files from the GDC data endpoint
-3. Save SVS files into data/gigatime/images so paths match annotations.csv
-4. Optionally upload downloaded SVS files to a private Wasabi bucket
+Main use case
+Stream TCGA SVS files from the GDC data endpoint directly into a private
+Wasabi bucket without saving full slide files locally.
+
+Modes
+1. Local mode
+   Used when --upload-wasabi is not provided.
+   Downloads SVS files into data/gigatime/images.
+
+2. Wasabi mode
+   Used when --upload-wasabi is provided.
+   Streams GDC response bytes into Wasabi multipart upload.
+   No full local SVS file is written.
 
 Credentials
 Do not store access keys in code or YAML.
@@ -27,7 +35,6 @@ import yaml
 
 
 GDC_DATA_BASE_URL = "https://api.gdc.cancer.gov/data"
-
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 DEFAULT_CONFIG = REPO_ROOT / "tcga_pipeline" / "gdc_config.yaml"
@@ -35,12 +42,24 @@ DEFAULT_CLINICAL_CSV = REPO_ROOT / "tcga_pipeline" / "clinical_gdc_TCGA-PAAD.csv
 DEFAULT_OUT_DIR = REPO_ROOT / "data" / "gigatime" / "images"
 
 
+def resolve_repo_path(path_value: str | Path) -> Path:
+    """
+    Resolve a path.
+
+    Relative paths are interpreted from the repository root.
+    Absolute paths are kept absolute.
+    """
+    path = Path(path_value)
+
+    if path.is_absolute():
+        return path.resolve()
+
+    return (REPO_ROOT / path).resolve()
+
+
 def parse_config_path() -> Path:
     """
-    Read only the --config argument first.
-
-    This lets the rest of the command line parser use values from YAML
-    as defaults.
+    Parse only --config first so YAML values can become parser defaults.
     """
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument(
@@ -55,10 +74,9 @@ def parse_config_path() -> Path:
 
 def load_config(config_path: Path) -> dict:
     """
-    Load YAML config.
+    Load YAML config if it exists.
 
-    If the file is missing, return an empty dict so command line defaults
-    can still work.
+    Missing config is allowed so this script can still run with command line defaults.
     """
     if not config_path.exists():
         return {}
@@ -69,9 +87,7 @@ def load_config(config_path: Path) -> dict:
 
 def section(config: dict, name: str) -> dict:
     """
-    Return a config section as a dict.
-
-    Missing sections are treated as empty so the script remains backward compatible.
+    Return a named YAML section as a dictionary.
     """
     value = config.get(name, {})
     if isinstance(value, dict):
@@ -79,27 +95,12 @@ def section(config: dict, name: str) -> dict:
     return {}
 
 
-def resolve_repo_path(path_value: str | Path) -> Path:
-    """
-    Resolve a path.
-
-    Relative paths are interpreted from the repository root.
-    Absolute paths are left as absolute paths.
-    """
-    path = Path(path_value)
-
-    if path.is_absolute():
-        return path.resolve()
-
-    return (REPO_ROOT / path).resolve()
-
-
 def parse_args(config_path: Path, config: dict) -> argparse.Namespace:
     """
     Parse command line options.
 
-    Most defaults come from gdc_config.yaml when those sections are present.
-    Command line arguments always override YAML defaults.
+    YAML provides defaults.
+    Command line arguments override YAML.
     """
     download_cfg = section(config, "download_settings")
     wasabi_cfg = section(config, "wasabi_settings")
@@ -109,16 +110,17 @@ def parse_args(config_path: Path, config: dict) -> argparse.Namespace:
     default_limit = int(download_cfg.get("default_limit", 3))
     default_timeout = int(download_cfg.get("timeout_seconds", 120))
     default_chunk_size = int(download_cfg.get("chunk_size_mb", 8))
+    default_part_size = int(download_cfg.get("multipart_part_size_mb", 64))
     default_gdc_token_env = download_cfg.get("gdc_token_env", "GDC_AUTH_TOKEN")
 
-    default_wasabi_upload = bool(wasabi_cfg.get("upload_default", False))
-    default_wasabi_bucket = wasabi_cfg.get("bucket", "")
-    default_wasabi_region = wasabi_cfg.get("region", "us-east-1")
-    default_wasabi_endpoint = wasabi_cfg.get(
+    default_upload = bool(wasabi_cfg.get("upload_default", False))
+    default_bucket = wasabi_cfg.get("bucket", "")
+    default_region = wasabi_cfg.get("region", "us-east-1")
+    default_endpoint = wasabi_cfg.get(
         "endpoint_url",
         "https://s3.us-east-1.wasabisys.com",
     )
-    default_wasabi_prefix = wasabi_cfg.get("prefix", "raw_svs/TCGA-PAAD")
+    default_prefix = wasabi_cfg.get("prefix", "raw_svs/TCGA-PAAD")
     default_access_key_env = wasabi_cfg.get(
         "access_key_env",
         "WASABI_ACCESS_KEY_ID",
@@ -129,7 +131,7 @@ def parse_args(config_path: Path, config: dict) -> argparse.Namespace:
     )
 
     parser = argparse.ArgumentParser(
-        description="Download TCGA SVS slides from GDC and optionally upload them to Wasabi."
+        description="Download TCGA SVS slides from GDC or stream them directly to Wasabi."
     )
 
     parser.add_argument(
@@ -141,27 +143,27 @@ def parse_args(config_path: Path, config: dict) -> argparse.Namespace:
     parser.add_argument(
         "--clinical-csv",
         default=default_clinical_csv,
-        help="Path to clinical_gdc_TCGA-PAAD.csv or equivalent clinical metadata CSV.",
+        help="Path to clinical_gdc_TCGA-PAAD.csv.",
     )
 
     parser.add_argument(
         "--out-dir",
         default=default_out_dir,
-        help="Folder where downloaded SVS files should be saved.",
+        help="Local output folder. Used only when --upload-wasabi is not set.",
     )
 
     parser.add_argument(
         "--limit",
         type=int,
         default=default_limit,
-        help="Number of files to process for testing. Ignored if --all is used.",
+        help="Number of files to process. Ignored if --all is used.",
     )
 
     parser.add_argument(
         "--start",
         type=int,
         default=0,
-        help="Zero based starting index in the deduplicated file list.",
+        help="Zero based start index in the deduplicated file list.",
     )
 
     parser.add_argument(
@@ -173,40 +175,47 @@ def parse_args(config_path: Path, config: dict) -> argparse.Namespace:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Print what would happen without downloading or uploading files.",
+        help="Print planned actions without downloading or uploading.",
     )
 
     parser.add_argument(
         "--overwrite-download",
         action="store_true",
-        help="Redownload files even if they already exist locally.",
+        help="Redownload local files even if they already exist. Local mode only.",
     )
 
     parser.add_argument(
         "--timeout-seconds",
         type=int,
         default=default_timeout,
-        help="Socket timeout for each GDC request.",
+        help="Socket timeout for GDC requests.",
     )
 
     parser.add_argument(
         "--chunk-size-mb",
         type=int,
         default=default_chunk_size,
-        help="Streaming chunk size in megabytes.",
+        help="GDC response streaming chunk size in MB.",
+    )
+
+    parser.add_argument(
+        "--multipart-part-size-mb",
+        type=int,
+        default=default_part_size,
+        help="Wasabi multipart upload part size in MB.",
     )
 
     parser.add_argument(
         "--gdc-token-env",
         default=default_gdc_token_env,
-        help="Environment variable containing a GDC token if controlled access is needed.",
+        help="Environment variable containing a GDC token if needed.",
     )
 
     parser.add_argument(
         "--upload-wasabi",
         action="store_true",
-        default=default_wasabi_upload,
-        help="Upload downloaded files to Wasabi.",
+        default=default_upload,
+        help="Stream GDC slide files directly to Wasabi.",
     )
 
     parser.add_argument(
@@ -218,26 +227,26 @@ def parse_args(config_path: Path, config: dict) -> argparse.Namespace:
 
     parser.add_argument(
         "--wasabi-bucket",
-        default=default_wasabi_bucket,
+        default=default_bucket,
         help="Wasabi bucket name.",
     )
 
     parser.add_argument(
         "--wasabi-region",
-        default=default_wasabi_region,
-        help="Wasabi region, for example us-east-1.",
+        default=default_region,
+        help="Wasabi region.",
     )
 
     parser.add_argument(
         "--wasabi-endpoint-url",
-        default=default_wasabi_endpoint,
+        default=default_endpoint,
         help="Wasabi S3 endpoint URL.",
     )
 
     parser.add_argument(
         "--wasabi-prefix",
-        default=default_wasabi_prefix,
-        help="Wasabi object prefix, for example raw_svs/TCGA-PAAD.",
+        default=default_prefix,
+        help="Wasabi object prefix.",
     )
 
     parser.add_argument(
@@ -255,13 +264,13 @@ def parse_args(config_path: Path, config: dict) -> argparse.Namespace:
     parser.add_argument(
         "--overwrite-wasabi",
         action="store_true",
-        help="Upload to Wasabi even if the object already exists.",
+        help="Upload even if the Wasabi object already exists.",
     )
 
     parser.add_argument(
         "--delete-local-after-upload",
         action="store_true",
-        help="Delete the local SVS after a successful Wasabi upload.",
+        help="Remove any matching local SVS after Wasabi upload or skip.",
     )
 
     return parser.parse_args()
@@ -269,14 +278,11 @@ def parse_args(config_path: Path, config: dict) -> argparse.Namespace:
 
 def read_clinical_csv(clinical_csv: Path) -> list[dict[str, str]]:
     """
-    Read clinical CSV rows and keep only rows with file_id and file_name.
+    Read clinical metadata rows.
 
     Required columns:
     file_id
     file_name
-
-    Useful optional column:
-    patient_id
     """
     if not clinical_csv.exists():
         raise FileNotFoundError(f"Clinical CSV not found: {clinical_csv}")
@@ -298,28 +304,26 @@ def read_clinical_csv(clinical_csv: Path) -> list[dict[str, str]]:
             file_id = (row.get("file_id") or "").strip()
             file_name = (row.get("file_name") or "").strip()
 
-            if not file_id or not file_name:
-                continue
-
-            rows.append(row)
+            if file_id and file_name:
+                rows.append(row)
 
     return rows
 
 
 def unique_file_records(rows: Iterable[dict[str, str]]) -> list[dict[str, str]]:
     """
-    Deduplicate by file_id so the same GDC file is processed only once.
+    Deduplicate by file_id.
     """
-    seen_file_ids: set[str] = set()
+    seen: set[str] = set()
     records: list[dict[str, str]] = []
 
     for row in rows:
         file_id = (row.get("file_id") or "").strip()
 
-        if file_id in seen_file_ids:
+        if file_id in seen:
             continue
 
-        seen_file_ids.add(file_id)
+        seen.add(file_id)
         records.append(row)
 
     return records
@@ -332,20 +336,20 @@ def select_records(
     process_all: bool,
 ) -> list[dict[str, str]]:
     """
-    Apply start and limit controls to the deduplicated file list.
+    Apply start and limit controls.
     """
     if start < 0:
         raise ValueError("--start must be 0 or greater")
 
-    records = records[start:]
+    selected = records[start:]
 
     if process_all:
-        return records
+        return selected
 
     if limit < 1:
         raise ValueError("--limit must be at least 1 unless --all is used")
 
-    return records[:limit]
+    return selected[:limit]
 
 
 def read_optional_env(env_name: str) -> str | None:
@@ -363,8 +367,6 @@ def read_optional_env(env_name: str) -> str | None:
 def read_required_env(env_name: str, purpose: str) -> str:
     """
     Read a required environment variable.
-
-    Used for Wasabi credentials so secrets never need to be stored in code.
     """
     value = os.environ.get(env_name)
 
@@ -378,91 +380,19 @@ def read_required_env(env_name: str, purpose: str) -> str:
 
 def mb(num_bytes: int | float) -> float:
     """
-    Convert bytes to megabytes for progress messages.
+    Convert bytes to MB.
     """
     return float(num_bytes) / (1024 * 1024)
 
 
-def download_one_slide(
-    file_id: str,
-    file_name: str,
-    out_dir: Path,
-    token: str | None = None,
-    overwrite: bool = False,
-    timeout_seconds: int = 120,
-    chunk_size_bytes: int = 8 * 1024 * 1024,
-) -> Path:
+def gdc_headers(token: str | None) -> dict[str, str]:
     """
-    Download one GDC file by file_id.
-
-    Saves to:
-    out_dir / file_name
-
-    Uses a .part file during download so incomplete files are obvious.
+    Build optional GDC auth headers.
     """
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    safe_file_name = Path(file_name).name
-    out_path = out_dir / safe_file_name
-    part_path = out_dir / f"{safe_file_name}.part"
-
-    if out_path.exists() and out_path.stat().st_size > 0 and not overwrite:
-        print(f"SKIP existing local file: {out_path}")
-        return out_path
-
-    if part_path.exists():
-        part_path.unlink()
-
-    url = f"{GDC_DATA_BASE_URL}/{file_id}"
-
-    headers = {}
     if token:
-        headers["X-Auth-Token"] = token
+        return {"X-Auth-Token": token}
 
-    print(f"Downloading {safe_file_name}")
-    print(f"  file_id: {file_id}")
-    print(f"  target : {out_path}")
-
-    with requests.get(
-        url,
-        headers=headers,
-        stream=True,
-        timeout=timeout_seconds,
-    ) as response:
-        response.raise_for_status()
-
-        total_bytes = int(response.headers.get("Content-Length", 0) or 0)
-        downloaded = 0
-        next_report = 64 * 1024 * 1024
-
-        with part_path.open("wb") as f:
-            for chunk in response.iter_content(chunk_size=chunk_size_bytes):
-                if not chunk:
-                    continue
-
-                f.write(chunk)
-                downloaded += len(chunk)
-
-                if downloaded >= next_report:
-                    if total_bytes:
-                        print(
-                            f"  progress: {mb(downloaded):.1f} MB / {mb(total_bytes):.1f} MB"
-                        )
-                    else:
-                        print(f"  progress: {mb(downloaded):.1f} MB")
-
-                    next_report += 64 * 1024 * 1024
-
-    if total_bytes and downloaded != total_bytes:
-        raise IOError(
-            f"Incomplete download for {safe_file_name}: "
-            f"got {downloaded} bytes, expected {total_bytes} bytes"
-        )
-
-    part_path.replace(out_path)
-    print(f"DONE local download: {safe_file_name} ({mb(downloaded):.1f} MB)")
-
-    return out_path
+    return {}
 
 
 def make_wasabi_client(
@@ -474,8 +404,7 @@ def make_wasabi_client(
     """
     Create an S3 compatible Wasabi client.
 
-    boto3 is imported only when upload is requested so local downloads
-    still work without boto3 installed.
+    boto3 is imported only when Wasabi upload is requested.
     """
     try:
         import boto3
@@ -498,10 +427,7 @@ def make_wasabi_client(
 
 def wasabi_object_key(prefix: str, file_name: str) -> str:
     """
-    Build a Wasabi object key.
-
-    Example:
-    raw_svs/TCGA-PAAD/example.svs
+    Build the Wasabi object key for one slide.
     """
     safe_file_name = Path(file_name).name
     clean_prefix = prefix.strip("/")
@@ -514,7 +440,7 @@ def wasabi_object_key(prefix: str, file_name: str) -> str:
 
 def wasabi_object_exists(client, bucket: str, key: str) -> bool:
     """
-    Return True if a Wasabi object already exists.
+    Check if a Wasabi object exists.
     """
     try:
         client.head_object(Bucket=bucket, Key=key)
@@ -530,30 +456,251 @@ def wasabi_object_exists(client, bucket: str, key: str) -> bool:
         raise
 
 
-def upload_one_slide_to_wasabi(
-    client,
-    local_path: Path,
-    bucket: str,
-    key: str,
-    overwrite: bool = False,
+def remove_local_copy_if_requested(
+    out_dir: Path,
+    file_name: str,
+    delete_local: bool,
 ) -> None:
     """
-    Upload one local SVS file to Wasabi.
-    """
-    if not local_path.exists():
-        raise FileNotFoundError(f"Local file missing, cannot upload: {local_path}")
+    Delete a matching local SVS file if requested.
 
+    Useful after switching from local staging to direct Wasabi streaming.
+    """
+    if not delete_local:
+        return
+
+    local_path = out_dir / Path(file_name).name
+    part_path = out_dir / f"{Path(file_name).name}.part"
+
+    for path in (local_path, part_path):
+        if path.exists():
+            path.unlink()
+            print(f"Deleted local file: {path}")
+
+
+def download_one_slide_to_local(
+    file_id: str,
+    file_name: str,
+    out_dir: Path,
+    token: str | None,
+    overwrite: bool,
+    timeout_seconds: int,
+    chunk_size_bytes: int,
+) -> Path:
+    """
+    Download one GDC file to local disk.
+
+    This is not used when --upload-wasabi is enabled.
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    safe_file_name = Path(file_name).name
+    out_path = out_dir / safe_file_name
+    part_path = out_dir / f"{safe_file_name}.part"
+
+    if out_path.exists() and out_path.stat().st_size > 0 and not overwrite:
+        print(f"SKIP existing local file: {out_path}")
+        return out_path
+
+    if part_path.exists():
+        part_path.unlink()
+
+    url = f"{GDC_DATA_BASE_URL}/{file_id}"
+
+    print(f"Downloading to local file: {safe_file_name}")
+    print(f"  target: {out_path}")
+
+    with requests.get(
+        url,
+        headers=gdc_headers(token),
+        stream=True,
+        timeout=timeout_seconds,
+    ) as response:
+        response.raise_for_status()
+
+        total_bytes = int(response.headers.get("Content-Length", 0) or 0)
+        downloaded = 0
+        next_report = 64 * 1024 * 1024
+
+        with part_path.open("wb") as f:
+            for chunk in response.iter_content(chunk_size=chunk_size_bytes):
+                if not chunk:
+                    continue
+
+                f.write(chunk)
+                downloaded += len(chunk)
+
+                if downloaded >= next_report:
+                    print_progress(downloaded, total_bytes)
+                    next_report += 64 * 1024 * 1024
+
+    if total_bytes and downloaded != total_bytes:
+        raise IOError(
+            f"Incomplete local download for {safe_file_name}: "
+            f"got {downloaded} bytes, expected {total_bytes} bytes"
+        )
+
+    part_path.replace(out_path)
+    print(f"DONE local download: {safe_file_name} ({mb(downloaded):.1f} MB)")
+
+    return out_path
+
+
+def print_progress(done_bytes: int, total_bytes: int) -> None:
+    """
+    Print transfer progress.
+    """
+    if total_bytes:
+        print(f"  progress: {mb(done_bytes):.1f} MB / {mb(total_bytes):.1f} MB")
+    else:
+        print(f"  progress: {mb(done_bytes):.1f} MB")
+
+
+def upload_buffer_part(
+    client,
+    bucket: str,
+    key: str,
+    upload_id: str,
+    part_number: int,
+    payload: bytes,
+) -> dict[str, int | str]:
+    """
+    Upload one multipart chunk to Wasabi.
+    """
+    response = client.upload_part(
+        Bucket=bucket,
+        Key=key,
+        UploadId=upload_id,
+        PartNumber=part_number,
+        Body=payload,
+    )
+
+    return {
+        "PartNumber": part_number,
+        "ETag": response["ETag"],
+    }
+
+
+def stream_gdc_slide_to_wasabi(
+    file_id: str,
+    file_name: str,
+    client,
+    bucket: str,
+    key: str,
+    token: str | None,
+    overwrite: bool,
+    timeout_seconds: int,
+    chunk_size_bytes: int,
+    part_size_bytes: int,
+) -> None:
+    """
+    Stream one GDC file directly into Wasabi using multipart upload.
+
+    No full local SVS file is written.
+    Data is buffered in memory up to part_size_bytes.
+    """
     if wasabi_object_exists(client, bucket, key) and not overwrite:
         print(f"SKIP existing Wasabi object: s3://{bucket}/{key}")
         return
 
-    print(f"Uploading to Wasabi: s3://{bucket}/{key}")
-    print(f"  local file: {local_path}")
-    print(f"  size      : {mb(local_path.stat().st_size):.1f} MB")
+    if part_size_bytes < 5 * 1024 * 1024:
+        raise ValueError("Wasabi multipart part size must be at least 5 MB")
 
-    client.upload_file(str(local_path), bucket, key)
+    url = f"{GDC_DATA_BASE_URL}/{file_id}"
 
-    print(f"DONE Wasabi upload: s3://{bucket}/{key}")
+    print(f"Streaming GDC to Wasabi: {Path(file_name).name}")
+    print(f"  file_id: {file_id}")
+    print(f"  target : s3://{bucket}/{key}")
+
+    upload_id = None
+    parts = []
+    buffer = bytearray()
+    part_number = 1
+    read_bytes = 0
+    uploaded_bytes = 0
+    next_report = 64 * 1024 * 1024
+
+    try:
+        with requests.get(
+            url,
+            headers=gdc_headers(token),
+            stream=True,
+            timeout=timeout_seconds,
+        ) as response:
+            response.raise_for_status()
+            total_bytes = int(response.headers.get("Content-Length", 0) or 0)
+
+            multipart = client.create_multipart_upload(
+                Bucket=bucket,
+                Key=key,
+                ContentType="application/octet-stream",
+            )
+            upload_id = multipart["UploadId"]
+
+            for chunk in response.iter_content(chunk_size=chunk_size_bytes):
+                if not chunk:
+                    continue
+
+                read_bytes += len(chunk)
+                buffer.extend(chunk)
+
+                while len(buffer) >= part_size_bytes:
+                    payload = bytes(buffer[:part_size_bytes])
+                    del buffer[:part_size_bytes]
+
+                    part = upload_buffer_part(
+                        client=client,
+                        bucket=bucket,
+                        key=key,
+                        upload_id=upload_id,
+                        part_number=part_number,
+                        payload=payload,
+                    )
+                    parts.append(part)
+
+                    uploaded_bytes += len(payload)
+                    part_number += 1
+
+                    if uploaded_bytes >= next_report:
+                        print_progress(uploaded_bytes, total_bytes)
+                        next_report += 64 * 1024 * 1024
+
+            if buffer:
+                payload = bytes(buffer)
+                part = upload_buffer_part(
+                    client=client,
+                    bucket=bucket,
+                    key=key,
+                    upload_id=upload_id,
+                    part_number=part_number,
+                    payload=payload,
+                )
+                parts.append(part)
+                uploaded_bytes += len(payload)
+
+            if total_bytes and read_bytes != total_bytes:
+                raise IOError(
+                    f"Incomplete GDC stream for {Path(file_name).name}: "
+                    f"got {read_bytes} bytes, expected {total_bytes} bytes"
+                )
+
+        client.complete_multipart_upload(
+            Bucket=bucket,
+            Key=key,
+            UploadId=upload_id,
+            MultipartUpload={"Parts": parts},
+        )
+
+    except Exception:
+        if upload_id:
+            client.abort_multipart_upload(
+                Bucket=bucket,
+                Key=key,
+                UploadId=upload_id,
+            )
+        raise
+
+    print(f"DONE Wasabi stream: s3://{bucket}/{key} ({mb(uploaded_bytes):.1f} MB)")
 
 
 def print_run_summary(
@@ -567,25 +714,25 @@ def print_run_summary(
     wasabi_prefix: str,
 ) -> None:
     """
-    Print a compact run summary before processing starts.
+    Print run settings.
     """
     print(f"Clinical CSV: {clinical_csv}")
-    print(f"Output dir  : {out_dir}")
     print(f"Rows read   : {len(all_rows)}")
     print(f"Unique files: {len(unique_records)}")
     print(f"Selected files for this run: {len(selected_records)}")
 
     if upload_wasabi:
-        print(f"Wasabi upload: enabled")
+        print("Mode        : stream GDC directly to Wasabi")
         print(f"Wasabi bucket: {wasabi_bucket}")
         print(f"Wasabi prefix: {wasabi_prefix}")
     else:
-        print("Wasabi upload: disabled")
+        print("Mode        : local download")
+        print(f"Output dir  : {out_dir}")
 
 
 def main() -> None:
     """
-    Run the GDC slide download and optional Wasabi upload workflow.
+    Run local download or direct Wasabi streaming workflow.
     """
     config_path = parse_config_path()
     config = load_config(config_path)
@@ -623,6 +770,7 @@ def main() -> None:
 
     gdc_token = read_optional_env(args.gdc_token_env)
     chunk_size_bytes = args.chunk_size_mb * 1024 * 1024
+    part_size_bytes = args.multipart_part_size_mb * 1024 * 1024
 
     wasabi_client = None
     if args.upload_wasabi and not args.dry_run:
@@ -651,31 +799,37 @@ def main() -> None:
             print("DRY RUN only. No file downloaded or uploaded.")
             continue
 
-        local_path = download_one_slide(
-            file_id=file_id,
-            file_name=file_name,
-            out_dir=out_dir,
-            token=gdc_token,
-            overwrite=args.overwrite_download,
-            timeout_seconds=args.timeout_seconds,
-            chunk_size_bytes=chunk_size_bytes,
-        )
-
         if args.upload_wasabi:
-            upload_one_slide_to_wasabi(
+            stream_gdc_slide_to_wasabi(
+                file_id=file_id,
+                file_name=file_name,
                 client=wasabi_client,
-                local_path=local_path,
                 bucket=args.wasabi_bucket,
                 key=wasabi_key,
+                token=gdc_token,
                 overwrite=args.overwrite_wasabi,
+                timeout_seconds=args.timeout_seconds,
+                chunk_size_bytes=chunk_size_bytes,
+                part_size_bytes=part_size_bytes,
+            )
+            remove_local_copy_if_requested(
+                out_dir=out_dir,
+                file_name=file_name,
+                delete_local=args.delete_local_after_upload,
+            )
+        else:
+            download_one_slide_to_local(
+                file_id=file_id,
+                file_name=file_name,
+                out_dir=out_dir,
+                token=gdc_token,
+                overwrite=args.overwrite_download,
+                timeout_seconds=args.timeout_seconds,
+                chunk_size_bytes=chunk_size_bytes,
             )
 
-            if args.delete_local_after_upload:
-                local_path.unlink()
-                print(f"Deleted local file after upload: {local_path}")
-
     print("")
-    print("Slide download workflow complete.")
+    print("Slide transfer workflow complete.")
 
 
 if __name__ == "__main__":

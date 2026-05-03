@@ -70,6 +70,7 @@ output_settings:
 
 download_settings:
   clinical_csv: tcga_pipeline/clinical_gdc_TCGA-PAAD.csv
+  multipart_part_size_mb: 64
   local_images_dir: data/gigatime/images
   default_limit: 3
   timeout_seconds: 120
