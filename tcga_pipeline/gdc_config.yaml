@@ -64,6 +64,26 @@ output_settings:
   # Output CSV name for the clinical file
   clinical_filename: clinical_gdc_{project_id}.csv
 
+# ------------------------------------------------------------
+# DOWNLOAD IMAGES TO JOINT ONLINE STORAGE (WASABI)
+# -------------------------------------------------------------
+
+download_settings:
+  clinical_csv: tcga_pipeline/clinical_gdc_TCGA-PAAD.csv
+  local_images_dir: data/gigatime/images
+  default_limit: 3
+  timeout_seconds: 120
+  chunk_size_mb: 8
+  gdc_token_env: GDC_AUTH_TOKEN
+
+wasabi_settings:
+  upload_default: false
+  bucket: tcga-paad-slides
+  region: us-east-1
+  endpoint_url: https://s3.us-east-1.wasabisys.com
+  prefix: raw_svs/TCGA-PAAD
+  access_key_env: WASABI_ACCESS_KEY_ID
+  secret_key_env: WASABI_SECRET_ACCESS_KEY
 
 advanced_settings:
   # ----------------------------------------------------------
